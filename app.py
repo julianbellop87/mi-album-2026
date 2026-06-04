@@ -64,7 +64,7 @@ def init_db():
 
 init_db()
 
-# Query de actualización incremental
+# Query de actualización incremental de inventario
 def actualizar_cantidad(id_lamina, operacion):
     conn = get_connection()
     cur = conn.cursor()
@@ -76,12 +76,12 @@ def actualizar_cantidad(id_lamina, operacion):
     cur.close()
     conn.close()
 
-# EXTRAER DATOS CON CONVERSIÓN NUMÉRICA EXPLICITA PARA EVITAR ERRORES DE CONSECUTIVO
+# EXTRAER DATOS CON CONVERSIÓN NUMÉRICA EXPLICITA DESDE POSTGRES
 conn = get_connection()
 df = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, quantity as cantidad FROM (SELECT id_lamina::INTEGER, equipo, grupo, descripcion, pagina, cantidad as quantity FROM album_2026) as t ORDER BY id_lamina ASC;", conn)
 conn.close()
 
-# Procesamiento de Inventario
+# Procesamiento analítico del inventario actual
 df['tiene'] = df['cantidad'].apply(lambda x: 1 if x > 0 else 0)
 df['es_repetida'] = df['cantidad'].apply(lambda x: x - 1 if x > 1 else 0)
 
@@ -97,72 +97,70 @@ progreso_gen = (total_tengo / total_laminas) * 100 if total_laminas > 0 else 0
 
 
 # ==========================================================
-# 🏛️ ELEMENTOS FIJOS SUPERIORES (ANTES DE LAS PESTAÑAS)
+# 🏛️ ELEMENTOS COMPACTOS SUPERIORES
 # ==========================================================
 col_logo_izq, col_logo_centro, col_logo_der = st.columns([1, 2, 1])
 with col_logo_centro:
     if os.path.exists("logo.jpg"):
-        st.image("logo.jpg", width=160) # Logo centrado y pequeño fijo
+        st.image("logo.jpg", width=150)
 
-st.markdown("<h2 style='text-align: center; margin-top: -10px;'>🏆 Mi Álbum Real 2026</h2>", unsafe_allow_html=True)
+st.markdown("<h2 style='text-align: center; margin-top: -15px; margin-bottom: 5px;'>🏆 Mi Álbum</h2>", unsafe_allow_html=True)
 
 
 # ==========================================================
-# 📑 ESTRUCTURA PRINCIPAL DE MENÚS (PESTAÑAS)
+# 📑 MENÚ DE PESTAÑAS PRINCIPALES
 # ==========================================================
 menu_principal = st.tabs(["📈 General", "📊 Porcentajes de Llenado", "⚙️ Navegador de Láminas"])
 
-# ------------------------------------------
-# MENU 1: GENERAL
-# ------------------------------------------
+# ----------------------------------------------------------
+# PESTAÑA 1: GENERAL (DASHBOARD COMPACTO Y WHATSAPP)
+# ----------------------------------------------------------
 with menu_principal[0]:
     st.write("")
-    # Progreso General explícito: Muestra Porcentaje y Cantidad exacta de láminas
-    st.markdown(f"<p style='text-align: center; margin-bottom: 5px; font-weight: bold; font-size: 16px;'>📊 Progreso General: {progreso_gen:.1f}% ({total_tengo} / {total_laminas} láminas)</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='text-align: center; margin-bottom: 5px; font-weight: bold; font-size: 15px;'>📊 Progreso General: {progreso_gen:.1f}% ({total_tengo} / {total_laminas} láminas)</p>", unsafe_allow_html=True)
     st.progress(progreso_gen / 100)
     
-    # Bloque de Métricas indicando explícitamente "Cantidad de láminas"
+    # Bloque Gris Adaptable
     st.markdown(f"""
-    <div style='display: flex; justify-content: space-around; text-align: center; background-color: #f0f2f6; padding: 10px; border-radius: 8px; margin-top: 10px; margin-bottom: 15px;'>
-        <div><b style='font-size: 12px; color: #2ecc71;'>✅ TENGO</b><br><span style='font-size: 14px; font-weight: bold;'>{total_tengo} láminas</span></div>
-        <div><b style='font-size: 12px; color: #e74c3c;'>🚨 FALTAN</b><br><span style='font-size: 14px; font-weight: bold;'>{total_faltan} láminas</span></div>
-        <div><b style='font-size: 12px; color: #f39c12;'>🔁 REPES</b><br><span style='font-size: 14px; font-weight: bold;'>{total_repes} láminas</span></div>
+    <div style='display: flex; justify-content: space-around; text-align: center; background-color: #f0f2f6; padding: 10px; border-radius: 8px; margin-top: 5px; margin-bottom: 15px;'>
+        <div><b style='font-size: 11px; color: #2ecc71;'>✅ TENGO</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_tengo} láminas</span></div>
+        <div><b style='font-size: 11px; color: #e74c3c;'>🚨 FALTAN</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_faltan} láminas</span></div>
+        <div><b style='font-size: 11px; color: #f39c12;'>🔁 REPES</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_repes} láminas</span></div>
     </div>
     """, unsafe_allow_html=True)
     
-    # Sección de Reportes para compartir por WhatsApp (Los 3 botones recuperados)
-    st.markdown("<h5 style='text-align: center;'>📲 Compartir Listados por WhatsApp</h5>", unsafe_allow_html=True)
+    st.markdown("<h6 style='text-align: center;'>📲 Enviar Reportes Directos a WhatsApp</h6>", unsafe_allow_html=True)
     
-    # 1. Botón Faltantes
+    # Compartir Faltantes
     txt_faltan = f"*🚨 MIS FALTANTES - ÁLBUM 2026* 🏆\n\nProgreso: {progreso_gen:.1f}% ({total_tengo}/{total_laminas})\n\n📋 *Faltan:* " + ", ".join([str(x) for x in faltan_lista[:80]]) + ("..." if len(faltan_lista) > 80 else "")
     link_f = f"https://api.whatsapp.com/send?text={quote(txt_faltan)}"
     st.markdown(f'<a href="{link_f}" target="_blank" style="text-decoration:none;"><button style="background-color:#E74C3C;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;margin-bottom:8px;">📋 Compartir Faltantes</button></a>', unsafe_allow_html=True)
 
-    # 2. Botón Repetidas
+    # Compartir Repetidas
     lista_repes_format = [f"{k}(x{v})" for k, v in repes_dict.items()]
     txt_repes = f"*🔁 MIS REPETIDAS - ÁLBUM 2026* 🏆\n\nTengo {total_repes} repetidas para cambiar:\n\n" + (", ".join(lista_repes_format[:80]) if lista_repes_format else "Ninguna por ahora 👍") + ("..." if len(lista_repes_format) > 80 else "")
     link_r = f"https://api.whatsapp.com/send?text={quote(txt_repes)}"
     st.markdown(f'<a href="{link_r}" target="_blank" style="text-decoration:none;"><button style="background-color:#F39C12;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;margin-bottom:8px;">🔁 Compartir Repetidas</button></a>', unsafe_allow_html=True)
 
-    # 3. Botón Lo Que Tengo (Recuperado)
-    txt_tengo = f"*✅ LO QUE TENGO PEgado - ÁLBUM 2026* 🏆\n\nMi listado de láminas adquiridas:\n\n" + ", ".join([str(x) for x in tengo_lista[:80]]) + ("..." if len(tengo_lista) > 80 else "")
+    # Compartir Lo Que Tengo
+    txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026* 🏆\n\nMi listado de láminas pegadas:\n\n" + ", ".join([str(x) for x in tengo_lista[:80]]) + ("..." if len(tengo_lista) > 80 else "")
     link_t = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
     st.markdown(f'<a href="{link_t}" target="_blank" style="text-decoration:none;"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-# ------------------------------------------
-# MENU 2: PORCENTAJES DE LLENADO
-# ------------------------------------------
+# ----------------------------------------------------------
+# PESTAÑA 2: PORCENTAJES DE LLENADO (ESTADÍSTICAS)
+# ----------------------------------------------------------
 with menu_principal[1]:
-    st.markdown("<h4>📊 Estadísticas Avanzadas de Progreso</h4>", unsafe_allow_html=True)
+    st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
     sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
     
     with sub_tabs[0]:
         df_pag = df.groupby(['pagina', 'equipo', 'grupo']).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index().sort_values(by='pagina')
         df_pag['Porcentaje'] = (df_pag['Adquiridas'] / df_pag['Total']) * 100
-        df_pag['Sección'] = df_pag.apply(lambda r: f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})", axis=1)
+        df_pag['Sección del Álbum'] = df_pag.apply(lambda r: f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})", axis=1)
         st.dataframe(
-            df_pag[['Sección', 'Total', 'Adquiridas', 'Porcentaje']].rename(
+            df_pag[['Sección del Álbum', 'Total', 'Adquiridas', 'Porcentaje']].rename(
                 columns={'Total': 'Total', 'Adquiridas': 'Tengo', 'Porcentaje': '% Llenado'}
             ).style.format({'% Llenado': '{:.1f}%'}),
             use_container_width=True, hide_index=True
@@ -172,10 +170,9 @@ with menu_principal[1]:
         df_equipo = df.groupby(['equipo', 'grupo']).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum'), primera_pag=('pagina', 'min')).reset_index()
         df_equipo['Porcentaje'] = (df_equipo['Adquiridas'] / df_equipo['Total']) * 100
         df_equipo_ordered = df_equipo.sort_values(by='primera_pag', ascending=True)
-        
         st.dataframe(
             df_equipo_ordered[['equipo', 'grupo', 'Total', 'Adquiridas', 'Porcentaje']].rename(
-                columns={'equipo': 'Equipo / Selección', 'grupo': 'Grupo', 'Total': 'Total', 'Adquiridas': 'Tengo', 'Porcentaje': '% Llenado'}
+                columns={'equipo': 'Equipo / Sección', 'grupo': 'Grupo', 'Total': 'Total', 'Adquiridas': 'Tengo', 'Porcentaje': '% Llenado'}
             ).style.format({'% Llenado': '{:.1f}%'}),
             use_container_width=True, hide_index=True
         )
@@ -188,23 +185,64 @@ with menu_principal[1]:
             st.progress(fila['Porcentaje'] / 100)
 
 
-# ------------------------------------------
-# MENU 3: NAVEGADOR DE LÁMINAS (ORDEN CONSECUTIVO PERFECTO)
-# ------------------------------------------
+# ----------------------------------------------------------
+# PESTAÑA 3: NAVEGADOR DE LÁMINAS (TODO ABAJO + CONTROL DE TEMA OSCURO)
+# ----------------------------------------------------------
 with menu_principal[2]:
-    st.markdown("<h4>⚙️ Panel de Control Secuencial</h4>", unsafe_allow_html=True)
+    st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
     
-    # Buscador por orden estricto de páginas del álbum
+    # --- 🔍 NUEVO BLOQUE DE BUSCADORES Y FILTROS AVANZADOS ---
+    with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=True):
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            # 1. Búsqueda por número exacto de lámina
+            buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="", placeholder="Ej: 16")
+        with col_b2:
+            # 2. Búsqueda por Equipo (Incluye "Estadios" en su posición real)
+            lista_equipos_filtro = ["Todos los Equipos"] + list(df.groupby('equipo', sort=False).first().index)
+            buscar_equipo = st.selectbox("⚽ Filtrar por Equipo / Selección:", lista_equipos_filtro)
+            
+        col_b3, col_b4 = st.columns(2)
+        with col_b3:
+            # 3. Búsqueda por Escudos
+            filtrar_escudos = st.checkbox("🛡️ Ver solo Escudos")
+        with col_b4:
+            # 4. Búsqueda por Equipo A y B
+            filtrar_equipos_ab = st.checkbox("👥 Ver solo Equipos A y B")
+
+    # --- 📑 FILTRO POR HOJA FÍSICA (PREDETERMINADO: VER TODO) ---
     lista_paginas_nav = df.groupby(['pagina', 'equipo', 'grupo']).size().reset_index().sort_values(by='pagina')
-    opciones_combo = [f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})" for _, r in lista_paginas_nav.iterrows()]
-    seleccion_combo = st.selectbox("Ir a la Sección del Álbum:", opciones_combo)
-    pagina_seleccionada = int(seleccion_combo.split(" ")[1])
-    
-    filtro_inventario = st.radio("Filtrar visualización actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
+    opciones_combo = ["Ver Todo el Álbum (735 Láminas)"] + [f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})" for _, r in lista_paginas_nav.iterrows()]
+    seleccion_combo = st.selectbox("📖 Filtrar por Sección del Álbum:", opciones_combo, index=0) # Predeterminado el índice 0 (Todo hacia abajo)
 
-    # Filtrar y asegurar el ORDEN CONSECUTIVO NUMÉRICO ABSOLUTO (1, 2, 3... 15 / 16, 17, 18...)
-    df_pagina_view = df[df['pagina'] == pagina_seleccionada].sort_values(by='id_lamina', ascending=True)
+    # Filtro de Estado de Inventario
+    filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
+    # --- APLICACIÓN DE REGLAS DE NEGOCIO SOBRE EL DATASET ---
+    df_pagina_view = df.copy()
+
+    # Aplicar Filtro de Combo de Página
+    if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
+        pagina_seleccionada = int(seleccion_combo.split(" ")[1])
+        df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == pagina_seleccionada]
+
+    # Aplicar Buscador por Número
+    if buscar_num.strip().isdigit():
+        df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
+
+    # Aplicar Buscador por Equipo
+    if buscar_equipo != "Todos los Equipos":
+        df_pagina_view = df_pagina_view[df_pagina_view['equipo'] == buscar_equipo]
+
+    # Aplicar Buscador de Escudos
+    if filtrar_escudos:
+        df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.lower().str.contains('escudo', na=False)]
+
+    # Aplicar Buscador de Equipos A y B
+    if filtrar_equipos_ab:
+        df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.lower().str.contains('equipo a|equipo b', na=False)]
+
+    # Aplicar Filtro de Estado de Inventario (Tengo, Faltan, Repes)
     if filtro_inventario == "Solo Faltantes 🚨":
         df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
     elif filtro_inventario == "Solo las que Tengo ✅":
@@ -212,27 +250,31 @@ with menu_principal[2]:
     elif filtro_inventario == "Solo Repetidas 🔁":
         df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
 
+    # Asegurar orden numérico estricto final antes de pintar
+    df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
+
+    # --- 🖼️ DESPLIEGUE VISUAL INMUNE AL TEMA OSCURO ---
     if df_pagina_view.empty:
-        st.info("No hay láminas en esta sección con el filtro seleccionado.")
+        st.info("No se encontraron láminas con los filtros seleccionados.")
     else:
         st.write("---")
-        # RENDERIZACIÓN VERTICAL INMUTABLE POR CONSECUTIVO DEL EXCEL
         for _, lam in df_pagina_view.iterrows():
-            id_l = int(lam['id_lamina']) # Forzar el ID a entero puro en la iteración visual
+            id_l = int(lam['id_lamina'])
             
-            c_info, c_estado, c_controles = st.columns([2, 1, 1])
+            # Fila horizontal adaptada para dispositivos móviles
+            c_info, c_estado, c_controles = st.columns([2, 1.2, 1])
             
             with c_info:
-                # Ahora los estadios saldrán impecablemente en orden: 1, 2, 3... hasta el 15
-                st.markdown(f"**Nº {id_l}** - {lam['descripcion']}")
+                st.markdown(f"**Nº {id_l}**\n\n_{lam['descripcion']}_\n\n<small>{lam['equipo']} ({lam['grupo']}) • Pág. {lam['pagina']}</small>", unsafe_allow_html=True)
                 
             with c_estado:
+                # SOLUCIÓN TEMA OSCURO: Usamos st.error/success/warning nativos para contraste automático
                 if lam['cantidad'] == 0:
-                    st.markdown("<span style='color:#e74c3c;font-weight:bold;'>Falta 🚨</span>", unsafe_allow_html=True)
+                    st.error("Falta 🚨")
                 elif lam['cantidad'] == 1:
-                    st.markdown("<span style='color:#2ecc71;font-weight:bold;'>Tengo ✅</span>", unsafe_allow_html=True)
+                    st.success("Tengo ✅")
                 else:
-                    st.markdown(f"<span style='color:#f39c12;font-weight:bold;'>Repes: {lam['cantidad']-1}</span>", unsafe_allow_html=True)
+                    st.warning(f"Repes: {lam['cantidad']-1}")
                     
             with c_controles:
                 btn_col1, btn_col2 = st.columns(2)
@@ -242,4 +284,4 @@ with menu_principal[2]:
                 if btn_col2.button("➖", key=f"sub_{id_l}"):
                     actualizar_cantidad(id_l, "restar")
                     st.rerun()
-            st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #e0e0e0;'>", unsafe_allow_html=True)
+            st.markdown("<hr style='margin: 6px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
