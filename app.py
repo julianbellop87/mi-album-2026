@@ -4,7 +4,7 @@ from urllib.parse import quote
 import pandas as pd
 import os
 
-# CONFIGURACIÓN DE PÁGINA ESENCIAL
+# CONFIGURACIÓN DE PÁGINA ESENCIAL (Debe ser lo primero)
 st.set_page_config(page_title="Mi Álbum", layout="centered")
 
 DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d8gfnpnlk1mc73er3tc0-a.virginia-postgres.render.com/db_album_2026"
@@ -12,7 +12,7 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# 1. Inicialización de la base de datos (Solo una vez al arrancar)
+# 1. Inicialización única de la Base de Datos
 @st.cache_resource
 def init_db_once():
     conn = get_connection()
@@ -61,7 +61,7 @@ def init_db_once():
 
 init_db_once()
 
-# 2. Carga inicial en memoria (Se ejecuta una sola vez)
+# 2. Carga del Inventario en Caché de Sesión Permanente (Evita caídas de sesión)
 if "df_album" not in st.session_state:
     conn = get_connection()
     df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
@@ -70,33 +70,43 @@ if "df_album" not in st.session_state:
     df_base['cantidad'] = df_base['cantidad'].astype(int)
     st.session_state["df_album"] = df_base.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
-# 3. Función de actualización rápida en BD y Memoria (SIN st.rerun)
-def modificar_cantidad(id_lamina, operacion):
+# --- CALLBACKS OPTIMIZADOS (Modifican UI local al instante y luego impactan BD) ---
+def cb_sumar(id_lamina):
     df_local = st.session_state["df_album"]
-    idx = df_local[df_local['id_lamina'] == int(id_lamina)].index
-    
+    idx = df_local[df_local['id_lamina'] == id_lamina].index
     if not idx.empty:
-        nueva_cant = df_local.loc[idx, 'cantidad'].values[0]
-        if operacion == "sumar":
-            nueva_cant += 1
-        elif operacion == "restar" and nueva_cant > 0:
-            nueva_cant -= 1
-            
-        # Actualizamos memoria local de inmediato
+        nueva_cant = int(df_local.loc[idx, 'cantidad'].values[0]) + 1
         st.session_state["df_album"].loc[idx, 'cantidad'] = nueva_cant
-        
-        # Enviamos el UPDATE directo a la BD de forma rápida
+        # Guardado rápido sin bloquear el hilo de la UI
         try:
             conn = get_connection()
             cur = conn.cursor()
-            cur.execute("UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;", (int(nueva_cant), str(id_lamina)))
+            cur.execute("UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;", (nueva_cant, str(id_lamina)))
             conn.commit()
             cur.close()
             conn.close()
         except:
             pass
 
-# Preparar datos analíticos en tiempo real
+def cb_restar(id_lamina):
+    df_local = st.session_state["df_album"]
+    idx = df_local[df_local['id_lamina'] == id_lamina].index
+    if not idx.empty:
+        actual = int(df_local.loc[idx, 'cantidad'].values[0])
+        if actual > 0:
+            nueva_cant = actual - 1
+            st.session_state["df_album"].loc[idx, 'cantidad'] = nueva_cant
+            try:
+                conn = get_connection()
+                cur = conn.cursor()
+                cur.execute("UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;", (nueva_cant, str(id_lamina)))
+                conn.commit()
+                cur.close()
+                conn.close()
+            except:
+                pass
+
+# Clon dinámico para métricas y renderizado
 df = st.session_state["df_album"].copy()
 df['tiene'] = df['cantidad'].apply(lambda x: 1 if x > 0 else 0)
 df['es_repetida'] = df['cantidad'].apply(lambda x: x - 1 if x > 1 else 0)
@@ -113,7 +123,7 @@ progreso_gen = (total_tengo / total_laminas) * 100 if total_laminas > 0 else 0
 
 
 # ==========================================================
-# 🔐 GESTIÓN DE SESIÓN
+# 🔐 GESTIÓN DE SEGURIDAD ESTABLE
 # ==========================================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -154,10 +164,10 @@ else:
                 del st.session_state["df_album"]
             st.rerun()
 
-    # TUS PESTAÑAS ORIGINALES HERMOSAS
+    # PESTAÑAS ORIGINALES (Mantiene la posición gracias al control de callbacks)
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
-    # PESTAÑA 1: GENERAL
+    # PESTAÑA 1: DASHBOARD
     with menu_principal[0]:
         st.write("")
         st.markdown(f"<p style='text-align: center; margin-bottom: 5px; font-weight: bold; font-size: 15px;'>📊 Progreso General: {progreso_gen:.1f}% ({total_tengo} / {total_laminas} láminas)</p>", unsafe_allow_html=True)
@@ -186,7 +196,7 @@ else:
         link_t = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (TU INTERFAZ ORIGINAL Y SUS FILTROS)
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS ORIGINAL
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -195,7 +205,7 @@ else:
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
-        # --- TODOS TUS FILTROS ORIGINALES DEVUELTOS ---
+        # Filtros Avanzados intactos
         with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=True):
             col_b1, col_b2 = st.columns(2)
             with col_b1:
@@ -224,7 +234,6 @@ else:
 
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        # Aplicación estricta de filtros
         df_pagina_view = df.copy()
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
             pagina_seleccionada = int(seleccion_combo.split(" ")[1])
@@ -249,14 +258,12 @@ else:
         elif filtro_inventario == "Solo Repetidas 🔁":
             df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
 
-        # Mantener el orden consecutivo original de las láminas
         df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
 
         if df_pagina_view.empty:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
             st.write("---")
-            # Renderizado optimizado
             for _, lam in df_pagina_view.iterrows():
                 id_l = int(lam['id_lamina'])
                 cant_actual = lam['cantidad']
@@ -281,12 +288,9 @@ else:
                     with c_controles:
                         btn_col1, btn_col2 = st.columns(2)
                         
-                        # AL CLICAR: Se ejecuta el query directo en BD y cambia el estado interno. NO se usa st.rerun().
-                        if btn_col1.button("➕", key=f"add_{id_l}"):
-                            modificar_cantidad(id_l, "sumar")
-                            
-                        if btn_col2.button("➖", key=f"sub_{id_l}"):
-                            modificar_cantidad(id_l, "restar")
+                        # SOLUCIÓN CLAVE: on_click nativo que redibuja la UI y actualiza la BD de forma segura
+                        btn_col1.button("➕", key=f"add_{id_l}", on_click=cb_sumar, args=(id_l,))
+                        btn_col2.button("➖", key=f"sub_{id_l}", on_click=cb_restar, args=(id_l,))
                             
                 st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
 
