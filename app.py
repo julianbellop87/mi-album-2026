@@ -311,4 +311,38 @@ else:
 
         # --- 🖼️ DESPLIEGUE VISUAL ADAPTABLE A CUALQUIER TEMA ---
         if df_pagina_view.empty:
-            st.
+            st.info("No se encontraron láminas con los filtros seleccionados.")
+        else:
+            st.write("---")
+            for _, lam in df_pagina_view.iterrows():
+                id_l = int(lam['id_lamina'])
+                
+                # Definición de columnas según el rol
+                if st.session_state["modo_rol"] == "admin":
+                    c_info, c_estado, c_controles = st.columns([2, 1.2, 1])
+                else:
+                    c_info, c_estado = st.columns([2.5, 1.5]) # En modo consulta toma más espacio de visualización
+                
+                with c_info:
+                    # SUB-DESCRIPCIÓN EN FORMATO PEQUEÑO ADAPTADO: Ejemplo "México (Grupo A)" o "Estadios (Grupo: No aplica)"
+                    st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} (Grupo: {lam['grupo']}) • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
+                    
+                with c_estado:
+                    if lam['cantidad'] == 0:
+                        st.error("Falta 🚨")
+                    elif lam['cantidad'] == 1:
+                        st.success("Tengo ✅")
+                    else:
+                        st.warning(f"Repes: {lam['cantidad']-1}")
+                        
+                if st.session_state["modo_rol"] == "admin":
+                    with c_controles:
+                        btn_col1, btn_col2 = st.columns(2)
+                        if btn_col1.button("➕", key=f"add_{id_l}"):
+                            actualizar_cantidad(id_l, "sumar")
+                            st.rerun()
+                        if btn_col2.button("➖", key=f"sub_{id_l}"):
+                            actualizar_cantidad(id_l, "restar")
+                            st.rerun()
+                            
+                st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
