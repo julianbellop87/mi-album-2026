@@ -3,17 +3,17 @@ import psycopg2
 from urllib.parse import quote
 import pandas as pd
 import os
+import threading  # <-- IMPORTANTE: Para enviar los cambios a la BD en segundo plano
 
 # CONFIGURACIÓN DE PÁGINA ESENCIAL
 st.set_page_config(page_title="Mi Álbum", layout="centered")
 
-# 1. CONEXIÓN A LA BASE DE DATOS
 DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d8gfnpnlk1mc73er3tc0-a.virginia-postgres.render.com/db_album_2026"
 
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# OPTIMIZACIÓN 1: El init_db SOLO se ejecuta una vez al encender la app, no en cada clic
+# Inicialización obligatoria una sola vez
 @st.cache_resource
 def init_db_once():
     conn = get_connection()
@@ -38,7 +38,6 @@ def init_db_once():
                 cantidad INT DEFAULT 0
             );
         """)
-        
         archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
         try:
             df_excel = pd.read_excel(archivo_excel)
@@ -63,8 +62,8 @@ def init_db_once():
 
 init_db_once()
 
-# Query de actualización asíncrona / remota
-def db_update_cantidad(id_lamina, operacion):
+# FUNCIÓN CRÍTICA: Se ejecuta de forma asíncrona en su propio hilo sin bloquear a Streamlit
+def db_update_worker(id_lamina, operacion):
     try:
         conn = get_connection()
         cur = conn.cursor()
@@ -75,10 +74,10 @@ def db_update_cantidad(id_lamina, operacion):
         conn.commit()
         cur.close()
         conn.close()
-    except:
-        pass
+    except Exception as e:
+        pass # Evita que un error de red tumbe la interfaz del usuario
 
-# OPTIMIZACIÓN 2: Guardar el dataset en el estado de la sesión para no hacer SELECT en cada clic
+# Carga inicial única del inventario en caché de sesión
 if "df_album" not in st.session_state:
     conn = get_connection()
     df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
@@ -87,12 +86,9 @@ if "df_album" not in st.session_state:
     df_base['cantidad'] = df_base['cantidad'].astype(int)
     st.session_state["df_album"] = df_base.sort_values(by='id_lamina', ascending=True)
 
-# Manejo muttable local instantáneo
+# OPTIMIZACIÓN ABSOLUTA: Modifica la UI instantáneamente y delega el Query a un hilo paralelo
 def modificar_inventario_local(id_lamina, operacion):
-    # 1. Modificación en la BD (Remoto)
-    db_update_cantidad(id_lamina, operacion)
-    
-    # 2. Modificación en la memoria de la App (Instantáneo para el usuario)
+    # 1. Modificación en la memoria local (Instantáneo, toma < 1 milisegundo)
     df_local = st.session_state["df_album"]
     idx = df_local[df_local['id_lamina'] == int(id_lamina)].index
     if not idx.empty:
@@ -102,8 +98,13 @@ def modificar_inventario_local(id_lamina, operacion):
             actual = st.session_state["df_album"].loc[idx, 'cantidad'].values[0]
             if actual > 0:
                 st.session_state["df_album"].loc[idx, 'cantidad'] -= 1
+                
+    # 2. Desacoplamiento: Se lanza el Query en un Thread independiente. 
+    # Python no esperará los 10 segundos de respuesta del servidor para renderizar la página.
+    thr = threading.Thread(target=db_update_worker, args=(id_lamina, operacion))
+    thr.start()
 
-# Procesar métricas usando los datos de la sesión local activa
+# Variables analíticas basadas en la sesión en tiempo real
 df = st.session_state["df_album"].copy()
 df['tiene'] = df['cantidad'].apply(lambda x: 1 if x > 0 else 0)
 df['es_repetida'] = df['cantidad'].apply(lambda x: x - 1 if x > 1 else 0)
@@ -161,7 +162,6 @@ else:
                 del st.session_state["df_album"]
             st.rerun()
 
-    # PESTAÑAS PRINCIPALES
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
     # PESTAÑA 1: GENERAL
@@ -213,7 +213,7 @@ else:
             col_b3, col_b4 = st.columns(2)
             with col_b3:
                 lista_grupos_filtro = ["Todos los Grupos"] + list(df['grupo'].unique())
-                buscar_grupo = st.selectbox("🗂️ Filtrar por Grupo:", buscar_grupo if 'buscar_grupo' in locals() else lista_grupos_filtro)
+                buscar_grupo = st.selectbox("🗂️ Filtrar por Grupo:", lista_grupos_filtro)
             with col_b4:
                 paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df['pagina'].unique())]
                 buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
@@ -282,7 +282,7 @@ else:
                 if st.session_state["modo_rol"] == "admin":
                     with c_controles:
                         btn_col1, btn_col2 = st.columns(2)
-                        # Al darle clic, modifica la memoria al instante y refresca rápido
+                        # CLIC INSTANTÁNEO: Ejecuta hilos en paralelo
                         if btn_col1.button("➕", key=f"add_{id_l}"):
                             modificar_inventario_local(id_l, "sumar")
                             st.rerun()
