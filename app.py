@@ -67,7 +67,7 @@ def init_db():
 
 init_db()
 
-# Query de actualización incremental de inventario (Usa la columna real 'cantidad')
+# Query de actualización de inventario nativa
 def actualizar_cantidad(id_lamina, operacion):
     conn = get_connection()
     cur = conn.cursor()
@@ -79,10 +79,14 @@ def actualizar_cantidad(id_lamina, operacion):
     cur.close()
     conn.close()
 
-# EXTRAER DATOS SIMPLE Y DIRECTO - CORREGIDO EL ENREDO DE QUANTITY
+# CONSULTA DIRECTA SIN ALIAS CONTRADICTORIOS
 conn = get_connection()
-df = pd.read_sql_query("SELECT id_lamina::INTEGER, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina ASC;", conn)
+df = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina ASC;", conn)
 conn.close()
+
+# Casteo explícito en pandas por seguridad
+df['id_lamina'] = df['id_lamina'].astype(int)
+df['cantidad'] = df['cantidad'].astype(int)
 
 # Procesamiento analítico del inventario actual
 df['tiene'] = df['cantidad'].apply(lambda x: 1 if x > 0 else 0)
