@@ -1,4 +1,4 @@
-import streamlit as st
+as st
 import psycopg2
 from urllib.parse import quote
 import pandas as pd
@@ -122,7 +122,8 @@ if not st.session_state["autenticado"]:
         pass_input = st.text_input("Contraseña:", type="password", value="")
         
         if st.button("🔓 Iniciar Sesión"):
-            if user_input == "admin" and pass_input == "admin":
+            # CONTRASEÑA ACTUALIZADA A 1234
+            if user_input == "admin" and pass_input == "1234":
                 st.session_state["autenticado"] = True
                 st.session_state["modo_rol"] = "admin"
                 st.success("Acceso como Administrador")
@@ -227,7 +228,7 @@ else:
 
 
     # ----------------------------------------------------------
-    # PESTAÑA 3: NAVEGADOR DE LÁMINAS (NUEVO FILTRO POR PÁGINA)
+    # PESTAÑA 3: NAVEGADOR DE LÁMINAS
     # ----------------------------------------------------------
     with menu_principal[2]:
         if st.session_state["modo_rol"] == "consulta":
@@ -251,7 +252,6 @@ else:
                 lista_grupos_filtro = ["Todos los Grupos"] + list(df['grupo'].unique())
                 buscar_grupo = st.selectbox("🗂️ Filtrar por Grupo del Torneo:", lista_grupos_filtro)
             with col_b4:
-                # ⭐ NUEVO FILTRO EXTRA: POR NÚMERO DE PÁGINA FÍSICA DIRECTO ⭐
                 paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df['pagina'].unique())]
                 buscar_por_pagina = st.selectbox("📄 Filtrar por Página del Álbum (Nº):", paginas_disponibles)
 
@@ -272,36 +272,28 @@ else:
         # --- REGLAS DE NEGOCIO SOBRE EL DATASET ---
         df_pagina_view = df.copy()
 
-        # Aplicar filtro de combo de sección completa
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
             pagina_seleccionada = int(seleccion_combo.split(" ")[1])
             df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == pagina_seleccionada]
 
-        # Aplicar Buscador por Número de Lámina
         if buscar_num.strip().isdigit():
             df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
 
-        # Aplicar Buscador por Equipo
         if buscar_equipo != "Todos los Equipos":
             df_pagina_view = df_pagina_view[df_pagina_view['equipo'] == buscar_equipo]
 
-        # Aplicar Filtro por Grupo
         if buscar_grupo != "Todos los Grupos":
             df_pagina_view = df_pagina_view[df_pagina_view['grupo'] == buscar_grupo]
 
-        # ⭐ Aplicar el nuevo Filtro por Número de Página Física directo ⭐
         if buscar_por_pagina != "Todas las Páginas":
             df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
 
-        # Aplicar Buscador de Escudos
         if filtrar_escudos:
             df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.lower().str.contains('escudo', na=False)]
 
-        # Aplicar Buscador de Equipos A y B
         if filtrar_equipos_ab:
             df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.lower().str.contains('equipo a|equipo b', na=False)]
 
-        # Aplicar Filtro de Estado de Inventario
         if filtro_inventario == "Solo Faltantes 🚨":
             df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
         elif filtro_inventario == "Solo las que Tengo ✅":
