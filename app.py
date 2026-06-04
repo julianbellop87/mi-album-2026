@@ -3,7 +3,6 @@ import psycopg2
 from urllib.parse import quote
 import pandas as pd
 import os
-import threading  # <-- IMPORTANTE: Para enviar los cambios a la BD en segundo plano
 
 # CONFIGURACIÓN DE PÁGINA ESENCIAL
 st.set_page_config(page_title="Mi Álbum", layout="centered")
@@ -13,7 +12,7 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# Inicialización obligatoria una sola vez
+# Inicialización única al arrancar el servidor
 @st.cache_resource
 def init_db_once():
     conn = get_connection()
@@ -62,22 +61,7 @@ def init_db_once():
 
 init_db_once()
 
-# FUNCIÓN CRÍTICA: Se ejecuta de forma asíncrona en su propio hilo sin bloquear a Streamlit
-def db_update_worker(id_lamina, operacion):
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-        if operacion == "sumar":
-            cur.execute("UPDATE album_2026 SET cantidad = cantidad + 1 WHERE id_lamina::varchar = %s::varchar;", (str(id_lamina),))
-        elif operacion == "restar":
-            cur.execute("UPDATE album_2026 SET cantidad = GREATEST(0, cantidad - 1) WHERE id_lamina::varchar = %s::varchar;", (str(id_lamina),))
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        pass # Evita que un error de red tumbe la interfaz del usuario
-
-# Carga inicial única del inventario en caché de sesión
+# Inicializar almacenamiento del inventario en caché si no existe
 if "df_album" not in st.session_state:
     conn = get_connection()
     df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
@@ -86,25 +70,50 @@ if "df_album" not in st.session_state:
     df_base['cantidad'] = df_base['cantidad'].astype(int)
     st.session_state["df_album"] = df_base.sort_values(by='id_lamina', ascending=True)
 
-# OPTIMIZACIÓN ABSOLUTA: Modifica la UI instantáneamente y delega el Query a un hilo paralelo
+# Bandera para saber si hay modificaciones pendientes por subir a la BD
+if "cambios_pendientes" not in st.session_state:
+    st.session_state["cambios_pendientes"] = False
+
+# FUNCIÓN PARA GUARDAR EN MEMORIA LOCAL (INSTANTÁNEO)
 def modificar_inventario_local(id_lamina, operacion):
-    # 1. Modificación en la memoria local (Instantáneo, toma < 1 milisegundo)
     df_local = st.session_state["df_album"]
     idx = df_local[df_local['id_lamina'] == int(id_lamina)].index
     if not idx.empty:
         if operacion == "sumar":
             st.session_state["df_album"].loc[idx, 'cantidad'] += 1
+            st.session_state["cambios_pendientes"] = True
         elif operacion == "restar":
             actual = st.session_state["df_album"].loc[idx, 'cantidad'].values[0]
             if actual > 0:
                 st.session_state["df_album"].loc[idx, 'cantidad'] -= 1
-                
-    # 2. Desacoplamiento: Se lanza el Query en un Thread independiente. 
-    # Python no esperará los 10 segundos de respuesta del servidor para renderizar la página.
-    thr = threading.Thread(target=db_update_worker, args=(id_lamina, operacion))
-    thr.start()
+                st.session_state["cambios_pendientes"] = True
 
-# Variables analíticas basadas en la sesión en tiempo real
+# FUNCIÓN TRANSACCIONAL EN LOTE (BATCH UPDATE)
+def guardar_cambios_en_db():
+    with st.spinner("Sincronizando inventario con la Base de Datos..."):
+        try:
+            conn = get_connection()
+            cur = conn.cursor()
+            
+            # Preparamos el lote completo con los valores actuales del DataFrame en memoria
+            lote_actualizacion = []
+            for _, fila in st.session_state["df_album"].iterrows():
+                lote_actualizacion.append((int(fila['cantidad']), str(fila['id_lamina'])))
+            
+            # Ejecución masiva optimizada
+            cur.executemany(
+                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;",
+                lote_actualizacion
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+            st.session_state["cambios_pendientes"] = False
+            st.success("¡Base de datos actualizada correctamente! 🎉")
+        except Exception as e:
+            st.error(f"Error al guardar en la base de datos: {e}")
+
+# Variables analíticas basadas en el estado local de memoria
 df = st.session_state["df_album"].copy()
 df['tiene'] = df['cantidad'].apply(lambda x: 1 if x > 0 else 0)
 df['es_repetida'] = df['cantidad'].apply(lambda x: x - 1 if x > 1 else 0)
@@ -160,7 +169,18 @@ else:
             st.session_state["modo_rol"] = None
             if "df_album" in st.session_state:
                 del st.session_state["df_album"]
+            st.session_state["cambios_pendientes"] = False
             st.rerun()
+
+    # --- 🚨 BOTÓN FIJO DE ADVERTENCIA PARA GUARDAR EN LOTES ---
+    if st.session_state["modo_rol"] == "admin":
+        if st.session_state["cambios_pendientes"]:
+            st.warning("⚠️ Tienes cambios locales sin guardar en la Base de Datos.")
+            if st.button("💾 GUARDAR CAMBIOS EN LA BASE DE DATOS", type="primary", use_container_width=True):
+                guardar_cambios_en_db()
+                st.rerun()
+        else:
+            st.info("✅ Todo el inventario local está sincronizado con la BD.")
 
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
@@ -282,7 +302,7 @@ else:
                 if st.session_state["modo_rol"] == "admin":
                     with c_controles:
                         btn_col1, btn_col2 = st.columns(2)
-                        # CLIC INSTANTÁNEO: Ejecuta hilos en paralelo
+                        # RESPUESTA INSTANTÁNEA (< 1ms): Modifica solo la memoria local
                         if btn_col1.button("➕", key=f"add_{id_l}"):
                             modificar_inventario_local(id_l, "sumar")
                             st.rerun()
