@@ -1,4 +1,4 @@
-as st
+import streamlit as st
 import psycopg2
 from urllib.parse import quote
 import pandas as pd
@@ -122,7 +122,6 @@ if not st.session_state["autenticado"]:
         pass_input = st.text_input("Contraseña:", type="password", value="")
         
         if st.button("🔓 Iniciar Sesión"):
-            # CONTRASEÑA ACTUALIZADA A 1234
             if user_input == "admin" and pass_input == "1234":
                 st.session_state["autenticado"] = True
                 st.session_state["modo_rol"] = "admin"
@@ -150,9 +149,9 @@ else:
             st.rerun()
 
     # ==========================================================
-    # 📑 MENÚ DE PESTAÑAS PRINCIPALES
+    # 📑 MENÚ DE PESTAÑAS PRINCIPALES (ORDEN MODIFICADO)
     # ==========================================================
-    menu_principal = st.tabs(["📈 General", "📊 Porcentajes de Llenado", "⚙️ Navegador de Láminas"])
+    menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
     # ----------------------------------------------------------
     # PESTAÑA 1: GENERAL (DASHBOARD COMPACTO Y WHATSAPP)
@@ -162,12 +161,12 @@ else:
         st.markdown(f"<p style='text-align: center; margin-bottom: 5px; font-weight: bold; font-size: 15px;'>📊 Progreso General: {progreso_gen:.1f}% ({total_tengo} / {total_laminas} láminas)</p>", unsafe_allow_html=True)
         st.progress(progreso_gen / 100)
         
-        # Bloque de Métricas Adaptable
+        # Bloque de Métricas Adaptable ("REPES" cambiado a "REPETIDAS")
         st.markdown(f"""
         <div style='display: flex; justify-content: space-around; text-align: center; background-color: #f0f2f6; padding: 10px; border-radius: 8px; margin-top: 5px; margin-bottom: 15px;'>
             <div><b style='font-size: 11px; color: #2ecc71;'>✅ TENGO</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_tengo} láminas</span></div>
             <div><b style='font-size: 11px; color: #e74c3c;'>🚨 FALTAN</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_faltan} láminas</span></div>
-            <div><b style='font-size: 11px; color: #f39c12;'>🔁 REPES</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_repes} láminas</span></div>
+            <div><b style='font-size: 11px; color: #f39c12;'>🔁 REPETIDAS</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_repes} láminas</span></div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -191,50 +190,13 @@ else:
 
 
     # ----------------------------------------------------------
-    # PESTAÑA 2: PORCENTAJES DE LLENADO (ESTADÍSTICAS)
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (AHORA DE SEGUNDA)
     # ----------------------------------------------------------
     with menu_principal[1]:
-        st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
-        sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
-        
-        with sub_tabs[0]:
-            df_pag = df.groupby(['pagina', 'equipo', 'grupo']).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index().sort_values(by='pagina')
-            df_pag['Porcentaje'] = (df_pag['Adquiridas'] / df_pag['Total']) * 100
-            df_pag['Sección del Álbum'] = df_pag.apply(lambda r: f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})", axis=1)
-            st.dataframe(
-                df_pag[['Sección del Álbum', 'Total', 'Adquiridas', 'Porcentaje']].rename(
-                    columns={'Total': 'Total', 'Adquiridas': 'Tengo', 'Porcentaje': '% Llenado'}
-                ).style.format({'% Llenado': '{:.1f}%'}),
-                use_container_width=True, hide_index=True
-            )
-
-        with sub_tabs[1]:
-            df_equipo = df.groupby(['equipo', 'grupo']).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum'), primera_pag=('pagina', 'min')).reset_index()
-            df_equipo['Porcentaje'] = (df_equipo['Adquiridas'] / df_equipo['Total']) * 100
-            df_equipo_ordered = df_equipo.sort_values(by='primera_pag', ascending=True)
-            st.dataframe(
-                df_equipo_ordered[['equipo', 'grupo', 'Total', 'Adquiridas', 'Porcentaje']].rename(
-                    columns={'equipo': 'Equipo / Sección', 'grupo': 'Grupo', 'Total': 'Total', 'Adquiridas': 'Tengo', 'Porcentaje': '% Llenado'}
-                ).style.format({'% Llenado': '{:.1f}%'}),
-                use_container_width=True, hide_index=True
-            )
-
-        with sub_tabs[2]:
-            df_grupo = df.groupby('grupo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
-            df_grupo['Porcentaje'] = (df_grupo['Adquiridas'] / df_grupo['Total']) * 100
-            for _, fila in df_grupo.iterrows():
-                st.write(f"**{fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']} ({fila['Porcentaje']:.1f}%)")
-                st.progress(fila['Porcentaje'] / 100)
-
-
-    # ----------------------------------------------------------
-    # PESTAÑA 3: NAVEGADOR DE LÁMINAS
-    # ----------------------------------------------------------
-    with menu_principal[2]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo: Visualización de avance sin edición de cantidades.")
         else:
-            st.success("🔑 Modo Administrador Activo: Permisos completos habilitados.")
+            st.success("🔑 Modo Administrator Activo: Permisos completos habilitados.")
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
@@ -266,7 +228,7 @@ else:
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"] + [f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})" for _, r in lista_paginas_nav.iterrows()]
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
 
-        # Filtro de Estado de Inventario
+        # Filtro de Estado de Inventario ("REPES" cambiado a "Repetidas")
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
         # --- REGLAS DE NEGOCIO SOBRE EL DATASET ---
@@ -326,7 +288,7 @@ else:
                     elif lam['cantidad'] == 1:
                         st.success("Tengo ✅")
                     else:
-                        st.warning(f"Repes: {lam['cantidad']-1}")
+                        st.warning(f"Repetidas: {lam['cantidad']-1}")
                         
                 if st.session_state["modo_rol"] == "admin":
                     with c_controles:
@@ -339,3 +301,40 @@ else:
                             st.rerun()
                             
                 st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
+
+
+    # ----------------------------------------------------------
+    # PESTAÑA 3: PORCENTAJES DE LLENADO (AHORA DE TERCERA)
+    # ----------------------------------------------------------
+    with menu_principal[2]:
+        st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
+        sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
+        
+        with sub_tabs[0]:
+            df_pag = df.groupby(['pagina', 'equipo', 'grupo']).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index().sort_values(by='pagina')
+            df_pag['Porcentaje'] = (df_pag['Adquiridas'] / df_pag['Total']) * 100
+            df_pag['Sección del Álbum'] = df_pag.apply(lambda r: f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})", axis=1)
+            st.dataframe(
+                df_pag[['Sección del Álbum', 'Total', 'Adquiridas', 'Porcentaje']].rename(
+                    columns={'Total': 'Total', 'Adquiridas': 'Tengo', 'Porcentaje': '% Llenado'}
+                ).style.format({'% Llenado': '{:.1f}%'}),
+                use_container_width=True, hide_index=True
+            )
+
+        with sub_tabs[1]:
+            df_equipo = df.groupby(['equipo', 'grupo']).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum'), primera_pag=('pagina', 'min')).reset_index()
+            df_equipo['Porcentaje'] = (df_equipo['Adquiridas'] / df_equipo['Total']) * 100
+            df_equipo_ordered = df_equipo.sort_values(by='primera_pag', ascending=True)
+            st.dataframe(
+                df_equipo_ordered[['equipo', 'grupo', 'Total', 'Adquiridas', 'Porcentaje']].rename(
+                    columns={'equipo': 'Equipo / Sección', 'grupo': 'Grupo', 'Total': 'Total', 'Adquiridas': 'Tengo', 'Porcentaje': '% Llenado'}
+                ).style.format({'% Llenado': '{:.1f}%'}),
+                use_container_width=True, hide_index=True
+            )
+
+        with sub_tabs[2]:
+            df_grupo = df.groupby('grupo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
+            df_grupo['Porcentaje'] = (df_grupo['Adquiridas'] / df_grupo['Total']) * 100
+            for _, fila in df_grupo.iterrows():
+                st.write(f"**{fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']} ({fila['Porcentaje']:.1f}%)")
+                st.progress(fila['Porcentaje'] / 100)
