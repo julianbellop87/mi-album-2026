@@ -73,7 +73,7 @@ if "df_album" not in st.session_state:
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
-# --- CALLBACKS 100% LOCALES (Mili-segundos y aseguran refresco visual) ---
+# --- CALLBACKS 100% LOCALES (Modifican UI al instante sin tocar red) ---
 def registrar_cambio_local(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
@@ -85,9 +85,9 @@ def registrar_cambio_local(id_lamina, operacion):
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
 
-# --- FUNCIÓN DE SINCRONIZACIÓN FORZADA (Solo va al servidor cuando tú quieres) ---
+# --- FUNCIÓN DE SINCRONIZACIÓN FORZADA ---
 def forzar_sincronizacion_bd():
-    with st.spinner("Guardando lote de cambios en Postgres (Virginia)..."):
+    with st.spinner("Sincronizando lote completo con Postgres..."):
         try:
             conn = get_connection()
             cur = conn.cursor()
@@ -95,7 +95,6 @@ def forzar_sincronizacion_bd():
             for _, fila in st.session_state["df_album"].iterrows():
                 lote.append((int(fila['cantidad']), str(fila['id_lamina'])))
             
-            # Un solo viaje transaccional optimizado para las 735 filas
             cur.executemany(
                 "UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;",
                 lote
@@ -104,11 +103,11 @@ def forzar_sincronizacion_bd():
             cur.close()
             conn.close()
             st.session_state["tiene_cambios"] = False
-            st.toast("¡Sincronización exitosa! 🏆 Todo guardado.", icon="💾")
+            st.toast("¡Álbum guardado en la nube con éxito! 🏆", icon="💾")
         except Exception as e:
             st.error(f"Error al sincronizar: {e}")
 
-# Clon de lectura rápido para construir la analítica de la interfaz
+# Clon de lectura rápido para construir la analítica
 df = st.session_state["df_album"].copy()
 df['tiene'] = df['cantidad'].apply(lambda x: 1 if x > 0 else 0)
 df['es_repetida'] = df['cantidad'].apply(lambda x: x - 1 if x > 1 else 0)
@@ -125,7 +124,7 @@ progreso_gen = (total_tengo / total_laminas) * 100 if total_laminas > 0 else 0
 
 
 # ==========================================================
-# 🔐 CONTROL DE ACCESO (PROTEGIDO)
+# 🔐 GESTIÓN DE SEGURIDAD ESTABLE
 # ==========================================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -167,20 +166,10 @@ else:
             st.session_state["tiene_cambios"] = False
             st.rerun()
 
-    # --- 🚨 TU SOLUCIÓN: PANEL DE CONTROL DE SINCRONIZACIÓN FIJO ---
-    if st.session_state["modo_rol"] == "admin":
-        if st.session_state["tiene_cambios"]:
-            st.warning("⚠️ Tienes modificaciones locales sin guardar en la nube.")
-            if st.button("💾 FORZAR SINCRONIZACIÓN CON EL SERVIDOR", type="primary", use_container_width=True):
-                forzar_sincronizacion_bd()
-                st.rerun()
-        else:
-            st.info("✅ Datos locales sincronizados con el servidor remoto.")
-
-    # PESTAÑAS ORIGINALES
+    # PESTAÑAS ORIGINALES CLEAN
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
-    # PESTAÑA 1: GENERAL
+    # PESTAÑA 1: DASHBOARD
     with menu_principal[0]:
         st.write("")
         st.markdown(f"<p style='text-align: center; margin-bottom: 5px; font-weight: bold; font-size: 15px;'>📊 Progreso General: {progreso_gen:.1f}% ({total_tengo} / {total_laminas} láminas)</p>", unsafe_allow_html=True)
@@ -209,7 +198,8 @@ else:
         link_t = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS ORIGINAL INTERACTIVO
+
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (EL PANEL DE CONTROL QUEDÓ ENCAPSULADO AQUÍ)
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -217,6 +207,16 @@ else:
             st.success("🔑 Modo Administrador Activo.")
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
+        
+        # --- 🚨 CORRECCIÓN AQUÍ: EL BOTÓN DE GUARDADO QUEDA ENCAPSULADO ADENTRO DE ESTA PESTAÑA ---
+        if st.session_state["modo_rol"] == "admin":
+            if st.session_state["tiene_cambios"]:
+                st.warning("⚠️ Tienes modificaciones locales sin guardar en la nube.")
+                if st.button("💾 FORZAR SINCRONIZACIÓN CON EL SERVIDOR", type="primary", use_container_width=True):
+                    forzar_sincronizacion_bd()
+                    st.rerun()
+            else:
+                st.info("✅ Datos locales sincronizados con el servidor remoto.")
         
         with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=True):
             col_b1, col_b2 = st.columns(2)
@@ -289,7 +289,6 @@ else:
                     st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} (Grupo: {lam['grupo']}) • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
                     
                 with c_estado:
-                    # RENDERIZADO ASOCIADO AL ESTADO DE MEMORIA DIRECTA
                     if cant_actual == 0:
                         st.error("Falta 🚨")
                     elif cant_actual == 1:
@@ -300,12 +299,11 @@ else:
                 if st.session_state["modo_rol"] == "admin":
                     with c_controles:
                         btn_col1, btn_col2 = st.columns(2)
-                        
-                        # MODIFICACIÓN EN MEMORIA E INVOCACIÓN AL REDIBUJO AUTOMÁTICO
                         btn_col1.button("➕", key=f"add_{id_l}", on_click=registrar_cambio_local, args=(id_l, "sumar"))
                         btn_col2.button("➖", key=f"sub_{id_l}", on_click=registrar_cambio_local, args=(id_l, "restar"))
                             
                 st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
+
 
     # PESTAÑA 3: PORCENTAJES DE LLENADO
     with menu_principal[2]:
