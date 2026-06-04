@@ -12,7 +12,7 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# Inicialización única al arrancar el servidor
+# Inicialización única en el arranque del servidor
 @st.cache_resource
 def init_db_once():
     conn = get_connection()
@@ -50,7 +50,7 @@ def init_db_once():
                     int(fila['Pagina'])
                 ))
             cur.executemany(
-                "INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina) VALUES (%s, %s, %s, %s, %s);", 
+                "INSERT INTO album_2026 (id_lamina, equipo, group, descripcion, pagina) VALUES (%s, %s, %s, %s, %s);", 
                 laminas_iniciales
             )
             conn.commit()
@@ -61,46 +61,25 @@ def init_db_once():
 
 init_db_once()
 
-# Inicializar almacenamiento del inventario en caché si no existe
+# Carga inicial estricta del inventario en memoria de sesión
 if "df_album" not in st.session_state:
     conn = get_connection()
     df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
     conn.close()
     df_base['id_lamina'] = df_base['id_lamina'].astype(int)
     df_base['cantidad'] = df_base['cantidad'].astype(int)
-    st.session_state["df_album"] = df_base.sort_values(by='id_lamina', ascending=True)
+    st.session_state["df_album"] = df_base.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
-# Bandera para saber si hay modificaciones pendientes por subir a la BD
-if "cambios_pendientes" not in st.session_state:
-    st.session_state["cambios_pendientes"] = False
-
-# FUNCIÓN PARA GUARDAR EN MEMORIA LOCAL (INSTANTÁNEO)
-def modificar_inventario_local(id_lamina, operacion):
-    df_local = st.session_state["df_album"]
-    idx = df_local[df_local['id_lamina'] == int(id_lamina)].index
-    if not idx.empty:
-        if operacion == "sumar":
-            st.session_state["df_album"].loc[idx, 'cantidad'] += 1
-            st.session_state["cambios_pendientes"] = True
-        elif operacion == "restar":
-            actual = st.session_state["df_album"].loc[idx, 'cantidad'].values[0]
-            if actual > 0:
-                st.session_state["df_album"].loc[idx, 'cantidad'] -= 1
-                st.session_state["cambios_pendientes"] = True
-
-# FUNCIÓN TRANSACCIONAL EN LOTE (BATCH UPDATE)
+# Sincronización masiva optimizada por lotes a PostgreSQL
 def guardar_cambios_en_db():
-    with st.spinner("Sincronizando inventario con la Base de Datos..."):
+    with st.spinner("Guardando lote de cambios en la Base de Datos Remota..."):
         try:
             conn = get_connection()
             cur = conn.cursor()
-            
-            # Preparamos el lote completo con los valores actuales del DataFrame en memoria
             lote_actualizacion = []
             for _, fila in st.session_state["df_album"].iterrows():
                 lote_actualizacion.append((int(fila['cantidad']), str(fila['id_lamina'])))
             
-            # Ejecución masiva optimizada
             cur.executemany(
                 "UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;",
                 lote_actualizacion
@@ -108,12 +87,11 @@ def guardar_cambios_en_db():
             conn.commit()
             cur.close()
             conn.close()
-            st.session_state["cambios_pendientes"] = False
-            st.success("¡Base de datos actualizada correctamente! 🎉")
+            st.success("¡Base de datos actualizada con éxito! 🏆")
         except Exception as e:
-            st.error(f"Error al guardar en la base de datos: {e}")
+            st.error(f"Error de persistencia: {e}")
 
-# Variables analíticas basadas en el estado local de memoria
+# Cálculo dinámico de métricas analíticas
 df = st.session_state["df_album"].copy()
 df['tiene'] = df['cantidad'].apply(lambda x: 1 if x > 0 else 0)
 df['es_repetida'] = df['cantidad'].apply(lambda x: x - 1 if x > 1 else 0)
@@ -130,7 +108,7 @@ progreso_gen = (total_tengo / total_laminas) * 100 if total_laminas > 0 else 0
 
 
 # ==========================================================
-# 🔐 CONTROL DE SESIÓN
+# 🔐 GESTIÓN DE SEGURIDAD Y SESIÓN
 # ==========================================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -169,22 +147,14 @@ else:
             st.session_state["modo_rol"] = None
             if "df_album" in st.session_state:
                 del st.session_state["df_album"]
-            st.session_state["cambios_pendientes"] = False
             st.rerun()
 
-    # --- 🚨 BOTÓN FIJO DE ADVERTENCIA PARA GUARDAR EN LOTES ---
-    if st.session_state["modo_rol"] == "admin":
-        if st.session_state["cambios_pendientes"]:
-            st.warning("⚠️ Tienes cambios locales sin guardar en la Base de Datos.")
-            if st.button("💾 GUARDAR CAMBIOS EN LA BASE DE DATOS", type="primary", use_container_width=True):
-                guardar_cambios_en_db()
-                st.rerun()
-        else:
-            st.info("✅ Todo el inventario local está sincronizado con la BD.")
-
+    # PESTAÑAS
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
-    # PESTAÑA 1: GENERAL
+    # ----------------------------------------------------------
+    # PESTAÑA 1: GENERAL (DASHBOARD)
+    # ----------------------------------------------------------
     with menu_principal[0]:
         st.write("")
         st.markdown(f"<p style='text-align: center; margin-bottom: 5px; font-weight: bold; font-size: 15px;'>📊 Progreso General: {progreso_gen:.1f}% ({total_tengo} / {total_laminas} láminas)</p>", unsafe_allow_html=True)
@@ -213,106 +183,92 @@ else:
         link_t = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS
+
+    # ----------------------------------------------------------
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (OPTIMIZACIÓN DATA_EDITOR)
+    # ----------------------------------------------------------
     with menu_principal[1]:
-        if st.session_state["modo_rol"] == "consulta":
-            st.info("👁️ Modo Consulta Activo.")
-        else:
-            st.success("🔑 Modo Administrator Activo.")
-
-        st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
+        st.markdown("<h4>⚙️ Gestión e Inventario Directo</h4>", unsafe_allow_html=True)
         
-        with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=True):
-            col_b1, col_b2 = st.columns(2)
-            with col_b1:
-                buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="", placeholder="Ej: 16")
-            with col_b2:
-                lista_equipos_filtro = ["Todos los Equipos"] + list(df.groupby('equipo', sort=False).first().index)
-                buscar_equipo = st.selectbox("⚽ Filtrar por Equipo:", lista_equipos_filtro)
-                
-            col_b3, col_b4 = st.columns(2)
-            with col_b3:
-                lista_grupos_filtro = ["Todos los Grupos"] + list(df['grupo'].unique())
-                buscar_grupo = st.selectbox("🗂️ Filtrar por Grupo:", lista_grupos_filtro)
-            with col_b4:
-                paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df['pagina'].unique())]
-                buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
-
-            col_b5, col_b6 = st.columns(2)
-            with col_b5:
-                filtrar_escudos = st.checkbox("🛡️ Ver solo Escudos")
-            with col_b6:
-                filtrar_equipos_ab = st.checkbox("👥 Ver solo Equipos A y B")
-
-        lista_paginas_nav = df.groupby(['pagina', 'equipo', 'grupo']).size().reset_index().sort_values(by='pagina')
-        opciones_combo = ["Ver Todo el Álbum (735 Láminas)"] + [f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})" for _, r in lista_paginas_nav.iterrows()]
-        seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
-
-        filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
-
-        df_pagina_view = df.copy()
-        if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
-            pagina_seleccionada = int(seleccion_combo.split(" ")[1])
-            df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == pagina_seleccionada]
-        if buscar_num.strip().isdigit():
-            df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
-        if buscar_equipo != "Todos los Equipos":
-            df_pagina_view = df_pagina_view[df_pagina_view['equipo'] == buscar_equipo]
-        if buscar_grupo != "Todos los Grupos":
-            df_pagina_view = df_pagina_view[df_pagina_view['grupo'] == buscar_grupo]
-        if buscar_por_pagina != "Todas las Páginas":
-            df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
-        if filtrar_escudos:
-            df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.lower().str.contains('escudo', na=False)]
-        if filtrar_equipos_ab:
-            df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.lower().str.contains('equipo a|equipo b', na=False)]
-
-        if filtro_inventario == "Solo Faltantes 🚨":
-            df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
-        elif filtro_inventario == "Solo las que Tengo ✅":
-            df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 0]
-        elif filtro_inventario == "Solo Repetidas 🔁":
-            df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
-
-        df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
-
-        if df_pagina_view.empty:
-            st.info("No se encontraron láminas con los filtros seleccionados.")
+        if st.session_state["modo_rol"] == "consulta":
+            st.info("👁️ Modo Consulta: Visualización de datos protegida.")
         else:
-            st.write("---")
-            for _, lam in df_pagina_view.iterrows():
-                id_l = int(lam['id_lamina'])
-                
-                if st.session_state["modo_rol"] == "admin":
-                    c_info, c_estado, c_controles = st.columns([2, 1.2, 1])
-                else:
-                    c_info, c_estado = st.columns([2.5, 1.5])
-                
-                with c_info:
-                    st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} (Grupo: {lam['grupo']}) • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
-                    
-                with c_estado:
-                    if lam['cantidad'] == 0:
-                        st.error("Falta 🚨")
-                    elif lam['cantidad'] == 1:
-                        st.success("Tengo ✅")
-                    else:
-                        st.warning(f"Repetidas: {lam['cantidad']-1}")
-                        
-                if st.session_state["modo_rol"] == "admin":
-                    with c_controles:
-                        btn_col1, btn_col2 = st.columns(2)
-                        # RESPUESTA INSTANTÁNEA (< 1ms): Modifica solo la memoria local
-                        if btn_col1.button("➕", key=f"add_{id_l}"):
-                            modificar_inventario_local(id_l, "sumar")
-                            st.rerun()
-                        if btn_col2.button("➖", key=f"sub_{id_l}"):
-                            modificar_inventario_local(id_l, "restar")
-                            st.rerun()
-                            
-                st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
+            st.success("🔑 Modo Administrador: Modifica los números en la columna 'Cantidad' directamente.")
+            
+        # Filtros Rápidos
+        col_fil1, col_fil2 = st.columns(2)
+        with col_fil1:
+            lista_equipos_filtro = ["Todos los Equipos"] + list(df.groupby('equipo', sort=False).first().index)
+            buscar_equipo = st.selectbox("⚽ Filtrar por Selección / Equipo:", lista_equipos_filtro)
+        with col_fil2:
+            filtro_inventario = st.selectbox("📊 Filtrar por Estado:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"])
 
+        # Generar sub-vista aplicando filtros antes de pintar el editor
+        df_view = st.session_state["df_album"].copy()
+        
+        if buscar_equipo != "Todos los Equipos":
+            df_view = df_view[df_view['equipo'] == buscar_equipo]
+            
+        if filtro_inventario == "Solo Faltantes 🚨":
+            df_view = df_view[df_view['cantidad'] == 0]
+        elif filtro_inventario == "Solo las que Tengo ✅":
+            df_view = df_view[df_view['cantidad'] > 0]
+        elif filtro_inventario == "Solo Repetidas 🔁":
+            df_view = df_view[df_view['cantidad'] > 1]
+            
+        df_view = df_view.sort_values(by='id_lamina', ascending=True)
+
+        # DESPLIEGUE DEL EDITOR DE DATOS EFICIENTE
+        if df_view.empty:
+            st.info("No hay registros que coincidan con el filtro.")
+        else:
+            if st.session_state["modo_rol"] == "admin":
+                # Data Editor interactivo: No recarga el script completo al modificar números
+                edited_df = st.data_editor(
+                    df_view,
+                    column_config={
+                        "id_lamina": st.column_config.NumberColumn("Nº Lámina", disabled=True, format="%d"),
+                        "descripcion": st.column_config.TextColumn("Descripción", disabled=True),
+                        "equipo": st.column_config.TextColumn("Equipo", disabled=True),
+                        "grupo": st.column_config.TextColumn("Grupo", disabled=True),
+                        "pagina": st.column_config.NumberColumn("Pág.", disabled=True, format="%d"),
+                        "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0, max_value=20, step=1, required=True),
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                    key="album_editor"
+                )
+                
+                # Sincronizamos las modificaciones del editor en la sesión sin consultar la base de datos
+                if st.session_state.get("album_editor") and "edited_rows" in st.session_state["album_editor"]:
+                    cambios = st.session_state["album_editor"]["edited_rows"]
+                    if cambios:
+                        for idx_relativo, columnas_cambiadas in cambios.items():
+                            if "cantidad" in columnas_cambiadas:
+                                nueva_cant = columnas_cambiadas["cantidad"]
+                                id_real = df_view.iloc[idx_relativo]["id_lamina"]
+                                idx_global = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_real].index
+                                st.session_state["df_album"].loc[idx_global, "cantidad"] = nueva_cant
+                        st.rerun()
+
+                st.write("")
+                if st.button("💾 GUARDAR CAMBIOS EN LA BASE DE DATOS", type="primary", use_container_width=True):
+                    guardar_cambios_en_db()
+                    st.rerun()
+            else:
+                # Si es modo consulta, solo se muestra en modo lectura estándar
+                st.dataframe(
+                    df_view,
+                    column_config={
+                        "id_lamina": "Nº Lámina", "descripcion": "Descripción", "equipo": "Equipo", "grupo": "Grupo", "pagina": "Pág.", "cantidad": "Cantidad"
+                    },
+                    hide_index=True, use_container_width=True
+                )
+
+
+    # ----------------------------------------------------------
     # PESTAÑA 3: PORCENTAJES DE LLENADO
+    # ----------------------------------------------------------
     with menu_principal[2]:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
         sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
