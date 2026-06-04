@@ -5,7 +5,7 @@ import os
 # Configuración de la página para celular y escritorio
 st.set_page_config(page_title="Mi Álbum 2026", layout="wide", initial_sidebar_state="collapsed")
 
-archivo_excel = "Album_CopaMundo2026.xlsx"
+archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
 archivo_datos = "inventario_album_2026.csv"
 archivo_logo = "logo.jpg"  # El nombre de tu imagen subida
 
