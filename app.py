@@ -4,7 +4,7 @@ from urllib.parse import quote
 import pandas as pd
 import os
 
-# CONFIGURACIÓN DE PÁGINA ANTES DE CUALQUIER ELEMENTO
+# CONFIGURACIÓN DE PÁGINA ESENCIAL
 st.set_page_config(page_title="Mi Álbum", layout="centered")
 
 # 1. CONEXIÓN A LA BASE DE DATOS
@@ -54,7 +54,7 @@ def init_db():
                 ))
             
             cur.executemany(
-                "INSERT INTO album_2026 (id_lamina, equipo, group_name, descripcion, pagina) VALUES (%s, %s, %s, %s, %s);", 
+                "INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina) VALUES (%s, %s, %s, %s, %s);", 
                 laminas_iniciales
             )
             conn.commit()
@@ -100,40 +100,38 @@ progreso_gen = (total_tengo / total_laminas) * 100 if total_laminas > 0 else 0
 
 
 # ==========================================================
-# 🔐 CONTROL DE SESIÓN COHESIVO (PERSISTENCIA ANTE DESCONEXIÓN)
+# 🔐 CONTROL DE SESIÓN COHESIVO
 # ==========================================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 if "modo_rol" not in st.session_state:
-    st.session_state["modo_rol"] = None  # Puede ser 'admin' o 'consulta'
+    st.session_state["modo_rol"] = None
 
-# PANTALLA PRINCIPAL DE LOGUEO (SOLO APARECE SI NO TIENE ROL ACTIVO)
+# PANTALLA PRINCIPAL DE LOGUEO
 if not st.session_state["autenticado"]:
-    col_logo_izq, col_logo_centro, col_logo_der = st.columns([1, 2, 1])
-    with col_logo_centro:
-        if os.path.exists("logo.jpg"):
-            st.image("logo.jpg", width=160)
+    if os.path.exists("logo.jpg"):
+        st.image("logo.jpg", width=140)
 
-    st.markdown("<h2 style='text-align: center; margin-top: -10px;'>👋 Bienvenido a Mi Álbum</h2>", unsafe_allow_html=True)
-    st.write("Selecciona tu modalidad de ingreso al sistema:")
+    st.markdown("<h3 style='margin-top: -5px;'>👋 Bienvenido a Mi Álbum</h3>", unsafe_allow_html=True)
+    st.write("Selecciona tu modalidad de ingreso:")
     
-    opcion_ingreso = st.radio("Modalidad de acceso:", ["Consulta (Solo Lectura) 👁️", "Usuario (Administrador) 🔑"], horizontal=True)
+    opcion_ingreso = st.radio("Acceso:", ["Consulta (Solo Lectura) 👁️", "Usuario (Administrador) 🔑"], horizontal=True)
     
     if "Usuario (Administrador)" in opcion_ingreso:
         user_input = st.text_input("Usuario:", value="")
         pass_input = st.text_input("Contraseña:", type="password", value="")
         
-        if st.button("🔓 Iniciar Sesión como Administrador"):
+        if st.button("🔓 Iniciar Sesión"):
             if user_input == "admin" and pass_input == "admin":
                 st.session_state["autenticado"] = True
                 st.session_state["modo_rol"] = "admin"
-                st.success("Acceso concedido como Administrador")
+                st.success("Acceso como Administrador")
                 st.rerun()
             else:
-                st.error("Credenciales incorrectas. Intenta de nuevo.")
+                st.error("Credenciales incorrectas.")
                 
     else:
-        st.write("💡 Accederás al sistema en modo de solo lectura. Podrás ver estadísticas, búsquedas e inventario pero no alterar las cantidades.")
+        st.write("💡 Modo de solo lectura habilitado.")
         if st.button("🚀 Ingresar Directo"):
             st.session_state["autenticado"] = True
             st.session_state["modo_rol"] = "consulta"
@@ -141,10 +139,8 @@ if not st.session_state["autenticado"]:
 
 # SI YA ESTÁ AUTENTICADO, SE DESPLIEGA TODA LA APLICACIÓN
 else:
-    # Encabezado súper limpio sin el logo estorbando arriba en móviles
     st.markdown("<h2 style='text-align: center; margin-top: -10px; margin-bottom: 5px;'>🏆 Mi Álbum</h2>", unsafe_allow_html=True)
     
-    # Pequeño botón para cambiar de usuario o cerrar sesión de forma controlada
     col_vacio, col_logout = st.columns([4, 1.2])
     with col_logout:
         if st.button("🚪 Salir"):
@@ -231,13 +227,13 @@ else:
 
 
     # ----------------------------------------------------------
-    # PESTAÑA 3: NAVEGADOR DE LÁMINAS (TODO ABAJO + CONTROL DE PRIVILEGIOS)
+    # PESTAÑA 3: NAVEGADOR DE LÁMINAS (NUEVO FILTRO POR PÁGINA)
     # ----------------------------------------------------------
     with menu_principal[2]:
         if st.session_state["modo_rol"] == "consulta":
-            st.info("👁️ Modo Consulta Activo: Puedes visualizar todo el avance pero la edición de cantidades está deshabilitada.")
+            st.info("👁️ Modo Consulta Activo: Visualización de avance sin edición de cantidades.")
         else:
-            st.success("🔑 Modo Administrador Activo: Permisos completos de escritura habilitados.")
+            st.success("🔑 Modo Administrador Activo: Permisos completos habilitados.")
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
@@ -245,40 +241,43 @@ else:
         with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=True):
             col_b1, col_b2 = st.columns(2)
             with col_b1:
-                # 1. Búsqueda por número de lámina
                 buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="", placeholder="Ej: 16")
             with col_b2:
-                # 2. Búsqueda por Equipo
                 lista_equipos_filtro = ["Todos los Equipos"] + list(df.groupby('equipo', sort=False).first().index)
                 buscar_equipo = st.selectbox("⚽ Filtrar por Equipo / Selección:", lista_equipos_filtro)
                 
             col_b3, col_b4 = st.columns(2)
             with col_b3:
-                # 3. NUEVO FILTRO POR GRUPO COMPLETADO (Incluye 'No aplica' para Estadios)
                 lista_grupos_filtro = ["Todos los Grupos"] + list(df['grupo'].unique())
                 buscar_grupo = st.selectbox("🗂️ Filtrar por Grupo del Torneo:", lista_grupos_filtro)
             with col_b4:
-                # Opciones complementarias en checkbox
+                # ⭐ NUEVO FILTRO EXTRA: POR NÚMERO DE PÁGINA FÍSICA DIRECTO ⭐
+                paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df['pagina'].unique())]
+                buscar_por_pagina = st.selectbox("📄 Filtrar por Página del Álbum (Nº):", paginas_disponibles)
+
+            col_b5, col_b6 = st.columns(2)
+            with col_b5:
                 filtrar_escudos = st.checkbox("🛡️ Ver solo Escudos")
+            with col_b6:
                 filtrar_equipos_ab = st.checkbox("👥 Ver solo Equipos A y B")
 
-        # --- FILTRO POR HOJA FÍSICA (PREDETERMINADO: VER TODO) ---
+        # --- FILTRO POR SECCIÓN COMPUESTA ---
         lista_paginas_nav = df.groupby(['pagina', 'equipo', 'grupo']).size().reset_index().sort_values(by='pagina')
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"] + [f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})" for _, r in lista_paginas_nav.iterrows()]
-        seleccion_combo = st.selectbox("📖 Filtrar por Sección del Álbum:", opciones_combo, index=0)
+        seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
 
         # Filtro de Estado de Inventario
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        # --- APLICACIÓN DE REGLAS DE NEGOCIO SOBRE EL DATASET ---
+        # --- REGLAS DE NEGOCIO SOBRE EL DATASET ---
         df_pagina_view = df.copy()
 
-        # Aplicar Filtro de Combo de Página
+        # Aplicar filtro de combo de sección completa
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
             pagina_seleccionada = int(seleccion_combo.split(" ")[1])
             df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == pagina_seleccionada]
 
-        # Aplicar Buscador por Número
+        # Aplicar Buscador por Número de Lámina
         if buscar_num.strip().isdigit():
             df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
 
@@ -286,9 +285,13 @@ else:
         if buscar_equipo != "Todos los Equipos":
             df_pagina_view = df_pagina_view[df_pagina_view['equipo'] == buscar_equipo]
 
-        # Aplicar Filtro por Grupo (Nuevo)
+        # Aplicar Filtro por Grupo
         if buscar_grupo != "Todos los Grupos":
             df_pagina_view = df_pagina_view[df_pagina_view['grupo'] == buscar_grupo]
+
+        # ⭐ Aplicar el nuevo Filtro por Número de Página Física directo ⭐
+        if buscar_por_pagina != "Todas las Páginas":
+            df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
 
         # Aplicar Buscador de Escudos
         if filtrar_escudos:
@@ -306,10 +309,10 @@ else:
         elif filtro_inventario == "Solo Repetidas 🔁":
             df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
 
-        # Asegurar orden numérico estricto final (Garantiza Estadios del 1 al 15 de primeros de corrido)
+        # Asegurar orden numérico estricto final
         df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
 
-        # --- 🖼️ DESPLIEGUE VISUAL ADAPTABLE A CUALQUIER TEMA ---
+        # --- 🖼️ DESPLIEGUE VISUAL ADAPTABLE ---
         if df_pagina_view.empty:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
@@ -317,14 +320,12 @@ else:
             for _, lam in df_pagina_view.iterrows():
                 id_l = int(lam['id_lamina'])
                 
-                # Definición de columnas según el rol
                 if st.session_state["modo_rol"] == "admin":
                     c_info, c_estado, c_controles = st.columns([2, 1.2, 1])
                 else:
-                    c_info, c_estado = st.columns([2.5, 1.5]) # En modo consulta toma más espacio de visualización
+                    c_info, c_estado = st.columns([2.5, 1.5])
                 
                 with c_info:
-                    # SUB-DESCRIPCIÓN EN FORMATO PEQUEÑO ADAPTADO: Ejemplo "México (Grupo A)" o "Estadios (Grupo: No aplica)"
                     st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} (Grupo: {lam['grupo']}) • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
                     
                 with c_estado:
