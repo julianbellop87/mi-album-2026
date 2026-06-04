@@ -174,3 +174,72 @@ with menu_principal[1]:
         df_equipo_ordered = df_equipo.sort_values(by='primera_pag', ascending=True)
         
         st.dataframe(
+            df_equipo_ordered[['equipo', 'grupo', 'Total', 'Adquiridas', 'Porcentaje']].rename(
+                columns={'equipo': 'Equipo / Selección', 'grupo': 'Grupo', 'Total': 'Total', 'Adquiridas': 'Tengo', 'Porcentaje': '% Llenado'}
+            ).style.format({'% Llenado': '{:.1f}%'}),
+            use_container_width=True, hide_index=True
+        )
+
+    with sub_tabs[2]:
+        df_grupo = df.groupby('grupo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
+        df_grupo['Porcentaje'] = (df_grupo['Adquiridas'] / df_grupo['Total']) * 100
+        for _, fila in df_grupo.iterrows():
+            st.write(f"**{fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']} ({fila['Porcentaje']:.1f}%)")
+            st.progress(fila['Porcentaje'] / 100)
+
+
+# ------------------------------------------
+# MENU 3: NAVEGADOR DE LÁMINAS (ORDEN CONSECUTIVO PERFECTO)
+# ------------------------------------------
+with menu_principal[2]:
+    st.markdown("<h4>⚙️ Panel de Control Secuencial</h4>", unsafe_allow_html=True)
+    
+    # Buscador por orden estricto de páginas del álbum
+    lista_paginas_nav = df.groupby(['pagina', 'equipo', 'grupo']).size().reset_index().sort_values(by='pagina')
+    opciones_combo = [f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})" for _, r in lista_paginas_nav.iterrows()]
+    seleccion_combo = st.selectbox("Ir a la Sección del Álbum:", opciones_combo)
+    pagina_seleccionada = int(seleccion_combo.split(" ")[1])
+    
+    filtro_inventario = st.radio("Filtrar visualización actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
+
+    # Filtrar y asegurar el ORDEN CONSECUTIVO NUMÉRICO ABSOLUTO (1, 2, 3... 15 / 16, 17, 18...)
+    df_pagina_view = df[df['pagina'] == pagina_seleccionada].sort_values(by='id_lamina', ascending=True)
+
+    if filtro_inventario == "Solo Faltantes 🚨":
+        df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
+    elif filtro_inventario == "Solo las que Tengo ✅":
+        df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 0]
+    elif filtro_inventario == "Solo Repetidas 🔁":
+        df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
+
+    if df_pagina_view.empty:
+        st.info("No hay láminas en esta sección con el filtro seleccionado.")
+    else:
+        st.write("---")
+        # RENDERIZACIÓN VERTICAL INMUTABLE POR CONSECUTIVO DEL EXCEL
+        for _, lam in df_pagina_view.iterrows():
+            id_l = int(lam['id_lamina']) # Forzar el ID a entero puro en la iteración visual
+            
+            c_info, c_estado, c_controles = st.columns([2, 1, 1])
+            
+            with c_info:
+                # Ahora los estadios saldrán impecablemente en orden: 1, 2, 3... hasta el 15
+                st.markdown(f"**Nº {id_l}** - {lam['descripcion']}")
+                
+            with c_estado:
+                if lam['cantidad'] == 0:
+                    st.markdown("<span style='color:#e74c3c;font-weight:bold;'>Falta 🚨</span>", unsafe_allow_html=True)
+                elif lam['cantidad'] == 1:
+                    st.markdown("<span style='color:#2ecc71;font-weight:bold;'>Tengo ✅</span>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<span style='color:#f39c12;font-weight:bold;'>Repes: {lam['cantidad']-1}</span>", unsafe_allow_html=True)
+                    
+            with c_controles:
+                btn_col1, btn_col2 = st.columns(2)
+                if btn_col1.button("➕", key=f"add_{id_l}"):
+                    actualizar_cantidad(id_l, "sumar")
+                    st.rerun()
+                if btn_col2.button("➖", key=f"sub_{id_l}"):
+                    actualizar_cantidad(id_l, "restar")
+                    st.rerun()
+            st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #e0e0e0;'>", unsafe_allow_html=True)
