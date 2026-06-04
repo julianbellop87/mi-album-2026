@@ -30,7 +30,7 @@ def init_db():
         cur.execute("DROP TABLE IF EXISTS album_2026;") 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS album_2026 (
-                id_lamina INT PRIMARY KEY,
+                id_lamina VARCHAR(50) PRIMARY KEY,
                 equipo VARCHAR(100),
                 grupo VARCHAR(50),
                 descripcion VARCHAR(150),
@@ -46,7 +46,7 @@ def init_db():
             laminas_iniciales = []
             for _, fila in df_excel.iterrows():
                 laminas_iniciales.append((
-                    int(fila['Laminas']),
+                    str(int(fila['Laminas'])).strip(),
                     str(fila['Equipo']).strip(),
                     str(fila['Grupo']).strip(),
                     str(fila['Descripicion']).strip(),
@@ -67,26 +67,28 @@ def init_db():
 
 init_db()
 
-# Query de actualización de inventario nativa
+# Query de actualización con CAST EXPLÍCITO para evitar el choque VARCHAR vs INT
 def actualizar_cantidad(id_lamina, operacion):
     conn = get_connection()
     cur = conn.cursor()
+    # Forzamos la comparación convirtiendo el parámetro a TEXT/VARCHAR explícitamente en el motor
     if operacion == "sumar":
-        cur.execute("UPDATE album_2026 SET cantidad = cantidad + 1 WHERE id_lamina = %s;", (id_lamina,))
+        cur.execute("UPDATE album_2026 SET cantidad = cantidad + 1 WHERE id_lamina::varchar = %s::varchar;", (str(id_lamina),))
     elif operacion == "restar":
-        cur.execute("UPDATE album_2026 SET cantidad = GREATEST(0, cantidad - 1) WHERE id_lamina = %s;", (id_lamina,))
+        cur.execute("UPDATE album_2026 SET cantidad = GREATEST(0, cantidad - 1) WHERE id_lamina::varchar = %s::varchar;", (str(id_lamina),))
     conn.commit()
     cur.close()
     conn.close()
 
-# CONSULTA DIRECTA SIN ALIAS CONTRADICTORIOS
+# CONSULTA CON CAST SEGURO A ENTERO EN PYTHON
 conn = get_connection()
-df = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina ASC;", conn)
+df = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
 conn.close()
 
-# Casteo explícito en pandas por seguridad
+# Normalizamos los tipos de datos en el DataFrame local
 df['id_lamina'] = df['id_lamina'].astype(int)
 df['cantidad'] = df['cantidad'].astype(int)
+df = df.sort_values(by='id_lamina', ascending=True)
 
 # Procesamiento analítico del inventario actual
 df['tiene'] = df['cantidad'].apply(lambda x: 1 if x > 0 else 0)
