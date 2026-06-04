@@ -2,74 +2,72 @@ import streamlit as st
 import psycopg2
 from urllib.parse import quote
 import pandas as pd
+import os
 
-# 1. CONEXIÓN A LA BASE DE DATOS
+# 1. CONEXIÓN A LA BASE DE DATOS RELACIONAL
 DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d8gfnpnlk1mc73er3tc0-a.virginia-postgres.render.com/db_album_2026"
 
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# Inicializar la base de datos con la estructura completa del Excel
+# Sincronizar el modelo físico con los 735 registros oficiales del Excel
 def init_db():
     conn = get_connection()
     cur = conn.cursor()
-    # Forzamos el reinicio para aplicar el nuevo esquema con todas las columnas
-    cur.execute("DROP TABLE IF EXISTS album_2026;") 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS album_2026 (
-            id_lamina VARCHAR(50) PRIMARY KEY,
-            equipo VARCHAR(100),
-            grupo VARCHAR(10),
-            descripcion VARCHAR(150),
-            pagina INT,
-            cantidad INT DEFAULT 0
-        );
-    """)
     
-    # Verificación de tabla vacía para precargar la estructura oficial extendida
-    cur.execute("SELECT COUNT(*) FROM album_2026;")
-    if cur.fetchone()[0] == 0:
-        laminas_iniciales = []
+    # Validar si la tabla ya está poblada con las 735 láminas reales para mantener persistencia
+    tabla_lista = False
+    try:
+        cur.execute("SELECT COUNT(*) FROM album_2026;")
+        if cur.fetchone()[0] == 735:
+            tabla_lista = True
+    except:
+        conn.rollback()
+
+    if not tabla_lista:
+        cur.execute("DROP TABLE IF EXISTS album_2026;") 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS album_2026 (
+                id_lamina VARCHAR(50) PRIMARY KEY,
+                equipo VARCHAR(100),
+                grupo VARCHAR(50),
+                descripcion VARCHAR(150),
+                pagina INT,
+                cantidad INT DEFAULT 0
+            );
+        """)
         
-        # Mapeo de Grupos y Equipos del Mundial 2026 (Formato oficial de 12 grupos de 4 equipos)
-        estructura_mundial = {
-            "Grupo A": ["USA", "MEX", "CAN", "CRC"],
-            "Grupo B": ["ARG", "BRA", "COL", "URU"],
-            "Grupo C": ["FRA", "ENG", "ESP", "GER"],
-            "Grupo D": ["ITA", "POR", "NED", "BEL"],
-            "Grupo E": ["CRO", "DEN", "SUI", "TUR"],
-            "Grupo F": ["MAR", "SEN", "TUN", "ALG"],
-            "Grupo G": ["EGY", "NGA", "CMR", "GHA"],
-            "Grupo H": ["RSA", "CIV", "MLI", "BUR"],
-            "Grupo I": ["JPN", "KOR", "IRN", "AUS"],
-            "Grupo J": ["KSA", "QAT", "IRQ", "UAE"],
-            "Grupo K": ["UZB", "NZL", "PAN", "ECU"],
-            "Grupo L": ["PER", "CHI", "PAR", "VEN"]
-        }
+        # Nombre exacto del archivo subido en tu repositorio de GitHub
+        archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
         
-        # Generación de registros simulando las páginas y descripciones del álbum Panini
-        pagina_actual = 1
-        for grupo, equipos in estructura_mundial.items():
-            for equipo in equipos:
-                # Cada equipo tiene su Escudo (ID 1) y sus jugadores clave (2 al 18)
-                for i in range(1, 19):
-                    id_lam = f"{equipo}{i}"
-                    desc = "Escudo Oficial" if i == 1 else f"Jugador {i}"
-                    laminas_iniciales.append((id_lam, equipo, grupo, desc, pagina_actual))
-                pagina_actual += 1 # Cada equipo ocupa una página diferente del álbum
-                
-        cur.executemany(
-            "INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina) VALUES (%s, %s, %s, %s, %s);", 
-            laminas_iniciales
-        )
-    conn.commit()
+        try:
+            df_excel = pd.read_excel(archivo_excel)
+            laminas_iniciales = []
+            for _, fila in df_excel.iterrows():
+                laminas_iniciales.append((
+                    str(fila['Laminas']).strip(),
+                    str(fila['Equipo']).strip(),
+                    str(fila['Grupo']).strip(),
+                    str(fila['Descripicion']).strip(),
+                    int(fila['Pagina'])
+                ))
+            
+            cur.executemany(
+                "INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina) VALUES (%s, %s, %s, %s, %s);", 
+                laminas_iniciales
+            )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            st.error(f"Error cargando archivo fuente en PostgreSQL: {e}")
+            
     cur.close()
     conn.close()
 
-# Ejecutar inicialización del nuevo esquema de datos
+# Inicializar esquema
 init_db()
 
-# Función para actualizar inventario vía Web
+# Query dinámico de actualización de inventario desde la interfaz móvil
 def actualizar_cantidad(id_lamina, operacion):
     conn = get_connection()
     cur = conn.cursor()
@@ -81,16 +79,15 @@ def actualizar_cantidad(id_lamina, operacion):
     cur.close()
     conn.close()
 
-# Extraer todos los datos del álbum para procesar con Pandas en memoria
+# Cargar el set de datos completo en memoria usando Pandas
 conn = get_connection()
-df = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY grupo, equipo, id_lamina;", conn)
+df = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY pagina, id_lamina;", conn)
 conn.close()
 
-# Variables de cálculo de inventario general
+# Procesamiento analítico de estados
 df['tiene'] = df['cantidad'].apply(lambda x: 1 if x > 0 else 0)
 df['es_repetida'] = df['cantidad'].apply(lambda x: x - 1 if x > 1 else 0)
 
-tengo_lista = df[df['cantidad'] > 0]['id_lamina'].tolist()
 faltan_lista = df[df['cantidad'] == 0]['id_lamina'].tolist()
 repes_dict = df[df['cantidad'] > 1].set_index('id_lamina')['es_repetida'].to_dict()
 
@@ -100,101 +97,129 @@ total_faltan = total_laminas - total_tengo
 total_repes = df['es_repetida'].sum()
 progreso_gen = (total_tengo / total_laminas) * 100 if total_laminas > 0 else 0
 
-# --- INTERFAZ GRÁFICA EN STREAMLIT ---
-if "logo.jpg":
+# --- INTERFAZ DE USUARIO (STREAMLIT UI) ---
+if os.path.exists("logo.jpg"):
     st.image("logo.jpg", use_container_width=True)
-st.title("🏆 Dashboard Álbum - Copa Mundo 2026")
-st.write("Gestiona tu inventario con analíticas de progreso en tiempo real.")
 
-# Métricas Globales
+st.title("🏆 Mi Álbum - Copa Mundo 2026")
+st.write("Análisis estadístico y gestión de inventario en tiempo real.")
+
+# --- METRICAS DE PROGRESO TOTAL DEL ALBUM ---
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Progreso General", f"{progreso_gen:.1f}%")
-col2.metric("Tengo", total_tengo)
-col3.metric("Faltan", total_faltan)
-col4.metric("Repetidas", total_repes)
+col1.metric("Progreso Álbum", f"{progreso_gen:.1f}%")
+col2.metric("Tengo (Únicas)", f"{total_tengo}/{total_laminas}")
+col3.metric("Faltantes", total_faltan)
+col4.metric("Total Repetidas", total_repes)
 
-# --- SECCIÓN DE PORCENTAJES Y ESTADÍSTICAS POR PARÁMETRO ---
+st.progress(progreso_gen / 100)
+
+# --- PANEL DE PORCENTAJES REQUERIDOS (GRUPO, EQUIPO, PAGINA) ---
 st.write("---")
-st.subheader("📈 Porcentajes de Llenado por Categoría")
+st.subheader("📊 Estadísticas de Llenado")
 
-pestana_grupo, pestana_equipo, pestana_pagina = st.tabs(["🗂️ Por Grupo", "🛡️ Por Equipo", "📄 Por Página"])
+tab_grupo, tab_equipo, tab_pagina = st.tabs(["🗂️ % Por Grupo", "🛡️ % Por Equipo", "📄 % Por Página"])
 
-with pestana_grupo:
-    st.write("**Progreso acumulado por cada grupo del torneo:**")
+with tab_grupo:
+    st.write("**Porcentaje de completado por Grupos oficiales:**")
     df_grupo = df.groupby('grupo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
-    df_grupo['% Llenado'] = (df_grupo['Adquiridas'] / df_grupo['Total']) * 100
+    df_grupo['Porcentaje'] = (df_grupo['Adquiridas'] / df_grupo['Total']) * 100
+    
+    # Mostrar como lista limpia con barras de progreso individuales
     for _, fila in df_grupo.iterrows():
-        st.write(f"*{fila['grupo']}:* {fila['Adquiridas']}/{fila['Total']} ({fila['% Llenado']:.1f}%)")
-        st.progress(fila['% Llenado'] / 100)
+        col_g1, col_g2 = st.columns([1, 3])
+        with col_g1:
+            st.write(f"**{fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']}")
+        with col_g2:
+            st.progress(fila['Porcentaje'] / 100, text=f"{fila['Porcentaje']:.1f}%")
 
-with pestana_equipo:
-    st.write("**Porcentaje de completado por Selección Nacional:**")
+with tab_equipo:
+    st.write("**Porcentaje de avance individual por Selección:**")
     df_equipo = df.groupby('equipo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
-    df_equipo['% Llenado'] = (df_equipo['Adquiridas'] / df_equipo['Total']) * 100
+    df_equipo['Porcentaje'] = (df_equipo['Adquiridas'] / df_equipo['Total']) * 100
     
-    # Selector dinámico para no saturar la pantalla móvil
-    busqueda_equipo = st.selectbox("Selecciona un equipo para evaluar su avance:", df_equipo['equipo'].unique())
-    datos_eq = df_equipo[df_equipo['equipo'] == busqueda_equipo].iloc[0]
-    st.info(f"⚽ **{busqueda_equipo}:** Cuenta con {datos_eq['Adquiridas']} de {datos_eq['Total']} láminas pegadas. **({datos_eq['% Llenado']:.1f}%)**")
-    st.progress(datos_eq['% Llenado'] / 100)
-
-with pestana_pagina:
-    st.write("**Control de avance numérico por Páginas del Álbum:**")
-    df_pag = df.groupby('pagina').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
-    df_pag['% Llenado'] = (df_pag['Adquiridas'] / df_pag['Total']) * 100
-    
-    # Mostrar un resumen rápido de las páginas más completadas
+    # Ordenar de mayor a menor progreso para identificar cuáles selecciones están cerca de completarse
+    df_equipo_sorted = df_equipo.sort_values(by='Porcentaje', ascending=False)
     st.dataframe(
-        df_pag.rename(columns={'pagina': 'Página Album', 'Total': 'Láminas Totales', 'Adquiridas': 'Pegadas'}).style.format({'% Llenado': '{:.1f}%'}),
+        df_equipo_sorted.rename(columns={'equipo': 'Selección', 'Total': 'Láminas Totales', 'Adquiridas': 'Tengo'}).style.format({'Porcentaje': '{:.1f}%'}),
         use_container_width=True,
         hide_index=True
     )
 
-# --- COMPARTIR POR WHATSAPP ---
+with tab_pagina:
+    st.write("**Porcentaje de llenado por cada Página física del Álbum:**")
+    df_pag = df.groupby('pagina').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
+    df_pag['Porcentaje'] = (df_pag['Adquiridas'] / df_pag['Total']) * 100
+    
+    st.dataframe(
+        df_pag.rename(columns={'pagina': 'Nº Página', 'Total': 'Láminas en Página', 'Adquiridas': 'Pegadas'}).style.format({'Porcentaje': '{:.1f}%'}),
+        use_container_width=True,
+        hide_index=True
+    )
+
+# --- CONTROL VISUAL AVANZADO (TENGO, FALTANTES, REPETIDAS) ---
+st.write("---")
+st.subheader("🔍 Cuadrícula Interactiva de Control")
+
+# Filtros combinados de visualización
+col_f1, col_f2 = st.columns(2)
+with col_f1:
+    grupo_seleccionado = st.selectbox("Selecciona un Grupo / Sección:", sorted(df['grupo'].unique()))
+with col_f2:
+    estado_filtro = st.radio("Ver láminas:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
+
+# Aplicar filtros al DataFrame en memoria
+df_view = df[df['grupo'] == grupo_seleccionado]
+
+if estado_filtro == "Solo Faltantes 🚨":
+    df_view = df_view[df_view['cantidad'] == 0]
+elif estado_filtro == "Solo las que Tengo ✅":
+    df_view = df_view[df_view['cantidad'] > 0]
+elif estado_filtro == "Solo Repetidas 🔁":
+    df_view = df_view[df_view['cantidad'] > 1]
+
+# Renderizar cuadrícula agrupada por equipo dentro del grupo seleccionado
+equipos_render = sorted(df_view['equipo'].unique())
+
+if not equipos_render:
+    st.info("No hay láminas en esta sección que coincidan con el filtro seleccionado.")
+else:
+    for eq in equipos_render:
+        with st.expander(f"🚩 {eq}"):
+            laminas_render = df_view[df_view['equipo'] == eq].to_dict('records')
+            cols = st.columns(3)
+            
+            for idx, lam in enumerate(laminas_render):
+                with cols[idx % 3]:
+                    st.markdown(f"**Lámina {lam['id_lamina']}**")
+                    st.caption(f"_{lam['descripcion']}_ • Pág. {lam['pagina']}")
+                    
+                    # Estilo dinámico según inventario real
+                    if lam['cantidad'] == 1:
+                        st.success("La tengo (x1)")
+                    elif lam['cantidad'] > 1:
+                        st.warning(f"Repetidas: {lam['cantidad'] - 1}")
+                    else:
+                        st.error("Falta 🚨")
+                    
+                    # Botones incrementales
+                    c1, c2 = st.columns(2)
+                    if c1.button("➕", key=f"add_{lam['id_lamina']}"):
+                        actualizar_cantidad(lam['id_lamina'], "sumar")
+                        st.rerun()
+                    if c2.button("➖", key=f"sub_{lam['id_lamina']}"):
+                        actualizar_cantidad(lam['id_lamina'], "restar")
+                        st.rerun()
+
+# --- COMPARTIR REPORTE POR WHATSAPP ---
 st.write("---")
 st.subheader("📲 Compartir Reporte con Amigos")
-faltantes_str = ", ".join(faltan_lista[:40]) + ("..." if len(faltan_lista) > 40 else "")
-repetidas_str = ", ".join([f"{k}(x{v})" for k, v in repes_dict.items()][:40]) if repes_dict else "Ninguna 👍"
+faltantes_str = ", ".join(faltan_lista[:50]) + ("..." if len(faltan_lista) > 50 else "")
+repetidas_str = ", ".join([f"{k}(x{v})" for k, v in repes_dict.items()][:50]) if repes_dict else "Ninguna 👍"
 
-texto_ws = f"*Mi Reporte Álbum 2026* 🏆\n\n" \
-           f"📊 *Progreso:* {progreso_gen:.1f}% ({total_tengo}/{total_laminas})\n" \
+texto_ws = f"*Mi Reporte Álbum Real 2026* 🏆\n\n" \
+           f"📊 *Progreso General:* {progreso_gen:.1f}% ({total_tengo}/{total_laminas})\n" \
            f"📋 *FALTAN ({total_faltan}):* {faltantes_str}\n\n" \
            f"🔁 *REPETIDAS:* {repetidas_str}"
 
 link_whatsapp = f"https://api.whatsapp.com/send?text={quote(texto_ws)}"
 st.markdown(f'<a href="{link_whatsapp}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;border:none;padding:12px 20px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;font-size:16px;">🟢 Enviar Listado por WhatsApp</button></a>', unsafe_allow_html=True)
-
-# --- PANEL INTERACTIVO DE CONTROL ---
-st.write("---")
-st.subheader("🔍 Cuadrícula de Modificación")
-
-filtro_grupo = st.selectbox("Filtrar visualización por Grupo:", sorted(df['grupo'].unique()))
-df_filtrado = df[df['grupo'] == filtro_grupo]
-
-equipos_en_grupo = sorted(df_filtrado['equipo'].unique())
-for eq in equipos_en_grupo:
-    with st.expander(f"🚩 Selección de {eq}"):
-        laminas_sel = df_filtrado[df_filtrado['equipo'] == eq].to_dict('records')
-        
-        cols = st.columns(3)
-        for idx, lam in enumerate(laminas_sel):
-            with cols[idx % 3]:
-                st.markdown(f"**{lam['id_lamina']}**")
-                st.caption(f"_{lam['descripcion']}_ • Pág. {lam['pagina']}")
-                
-                # Visualización del estado del inventario
-                if lam['cantidad'] == 1:
-                    st.success("La tengo")
-                elif lam['cantidad'] > 1:
-                    st.warning(f"Repes: {lam['cantidad'] - 1}")
-                else:
-                    st.error("Falta")
-                
-                # Controladores incrementales
-                c1, c2 = st.columns(2)
-                if c1.button("➕", key=f"add_{lam['id_lamina']}"):
-                    actualizar_cantidad(lam['id_lamina'], "sumar")
-                    st.rerun()
-                if c2.button("➖", key=f"sub_{lam['id_lamina']}"):
-                    actualizar_cantidad(lam['id_lamina'], "restar")
-                    st.rerun()
