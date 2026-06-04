@@ -12,7 +12,6 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# Inicialización única de la base de datos en el arranque del contenedor
 @st.cache_resource
 def init_db_once():
     conn = get_connection()
@@ -61,7 +60,7 @@ def init_db_once():
 
 init_db_once()
 
-# 2. CACHÉ DE SESIÓN PERMANENTE Y CONTROL DE CAMBIOS LOCALES
+# 2. MEMORIA CACHÉ LOCAL ULTRA-RÁPIDA
 if "df_album" not in st.session_state:
     conn = get_connection()
     df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
@@ -73,7 +72,7 @@ if "df_album" not in st.session_state:
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
-# --- CALLBACKS 100% LOCALES (Modifican UI al instante sin tocar red) ---
+# --- CALLBACKS ULTRA-LIGEROS (Solo alteran la celda específica del array) ---
 def registrar_cambio_local(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
@@ -85,7 +84,7 @@ def registrar_cambio_local(id_lamina, operacion):
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
 
-# --- FUNCIÓN DE SINCRONIZACIÓN FORZADA ---
+# --- SINCRONIZACIÓN BAJO DEMANDA (BATCH CORRECTION) ---
 def forzar_sincronizacion_bd():
     with st.spinner("Sincronizando lote completo con Postgres..."):
         try:
@@ -107,24 +106,8 @@ def forzar_sincronizacion_bd():
         except Exception as e:
             st.error(f"Error al sincronizar: {e}")
 
-# Clon de lectura rápido para construir la analítica
-df = st.session_state["df_album"].copy()
-df['tiene'] = df['cantidad'].apply(lambda x: 1 if x > 0 else 0)
-df['es_repetida'] = df['cantidad'].apply(lambda x: x - 1 if x > 1 else 0)
-
-tengo_lista = df[df['cantidad'] > 0]['id_lamina'].tolist()
-faltan_lista = df[df['cantidad'] == 0]['id_lamina'].tolist()
-repes_dict = df[df['cantidad'] > 1].set_index('id_lamina')['es_repetida'].to_dict()
-
-total_laminas = len(df)
-total_tengo = df['tiene'].sum()
-total_faltan = total_laminas - total_tengo
-total_repes = df['es_repetida'].sum()
-progreso_gen = (total_tengo / total_laminas) * 100 if total_laminas > 0 else 0
-
-
 # ==========================================================
-# 🔐 GESTIÓN DE SEGURIDAD ESTABLE
+# 🔐 SEGURIDAD
 # ==========================================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -166,11 +149,25 @@ else:
             st.session_state["tiene_cambios"] = False
             st.rerun()
 
-    # PESTAÑAS ORIGINALES CLEAN
+    # PESTAÑAS
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
-    # PESTAÑA 1: DASHBOARD
+    # PESTAÑA 1: DASHBOARD (Cálculo perezoso: Solo se ejecuta si abres esta pestaña)
     with menu_principal[0]:
+        df_gen = st.session_state["df_album"].copy()
+        df_gen['tiene'] = df_gen['cantidad'].apply(lambda x: 1 if x > 0 else 0)
+        df_gen['es_repetida'] = df_gen['cantidad'].apply(lambda x: x - 1 if x > 1 else 0)
+
+        tengo_lista = df_gen[df_gen['cantidad'] > 0]['id_lamina'].tolist()
+        faltan_lista = df_gen[df_gen['cantidad'] == 0]['id_lamina'].tolist()
+        repes_dict = df_gen[df_gen['cantidad'] > 1].set_index('id_lamina')['es_repetida'].to_dict()
+
+        total_laminas = len(df_gen)
+        total_tengo = df_gen['tiene'].sum()
+        total_faltan = total_laminas - total_tengo
+        total_repes = df_gen['es_repetida'].sum()
+        progreso_gen = (total_tengo / total_laminas) * 100 if total_laminas > 0 else 0
+
         st.write("")
         st.markdown(f"<p style='text-align: center; margin-bottom: 5px; font-weight: bold; font-size: 15px;'>📊 Progreso General: {progreso_gen:.1f}% ({total_tengo} / {total_laminas} láminas)</p>", unsafe_allow_html=True)
         st.progress(progreso_gen / 100)
@@ -199,7 +196,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (EL PANEL DE CONTROL QUEDÓ ENCAPSULADO AQUÍ)
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (Aislado y optimizado para clics ultra veloces)
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -208,7 +205,6 @@ else:
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
-        # --- 🚨 CORRECCIÓN AQUÍ: EL BOTÓN DE GUARDADO QUEDA ENCAPSULADO ADENTRO DE ESTA PESTAÑA ---
         if st.session_state["modo_rol"] == "admin":
             if st.session_state["tiene_cambios"]:
                 st.warning("⚠️ Tienes modificaciones locales sin guardar en la nube.")
@@ -218,20 +214,23 @@ else:
             else:
                 st.info("✅ Datos locales sincronizados con el servidor remoto.")
         
-        with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=True):
+        # Clon local exclusivo y liviano para filtros rápidos
+        df_nav = st.session_state["df_album"]
+        
+        with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=False):
             col_b1, col_b2 = st.columns(2)
             with col_b1:
                 buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="", placeholder="Ej: 16")
             with col_b2:
-                lista_equipos_filtro = ["Todos los Equipos"] + list(df.groupby('equipo', sort=False).first().index)
+                lista_equipos_filtro = ["Todos los Equipos"] + list(df_nav.groupby('equipo', sort=False).first().index)
                 buscar_equipo = st.selectbox("⚽ Filtrar por Equipo:", lista_equipos_filtro)
                 
             col_b3, col_b4 = st.columns(2)
             with col_b3:
-                lista_grupos_filtro = ["Todos los Grupos"] + list(df['grupo'].unique())
+                lista_grupos_filtro = ["Todos los Grupos"] + list(df_nav['grupo'].unique())
                 buscar_grupo = st.selectbox("🗂️ Filtrar por Grupo:", lista_grupos_filtro)
             with col_b4:
-                paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df['pagina'].unique())]
+                paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())]
                 buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
 
             col_b5, col_b6 = st.columns(2)
@@ -240,13 +239,14 @@ else:
             with col_b6:
                 filtrar_equipos_ab = st.checkbox("👥 Ver solo Equipos A y B")
 
-        lista_paginas_nav = df.groupby(['pagina', 'equipo', 'grupo']).size().reset_index().sort_values(by='pagina')
+        lista_paginas_nav = df_nav.groupby(['pagina', 'equipo', 'grupo']).size().reset_index().sort_values(by='pagina')
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"] + [f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})" for _, r in lista_paginas_nav.iterrows()]
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
 
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        df_pagina_view = df.copy()
+        # Filtrado veloz
+        df_pagina_view = df_nav.copy()
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
             pagina_seleccionada = int(seleccion_combo.split(" ")[1])
             df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == pagina_seleccionada]
@@ -286,7 +286,7 @@ else:
                     c_info, c_estado = st.columns([2.5, 1.5])
                 
                 with c_info:
-                    st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} (Grupo: {lam['grupo']}) • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
+                    st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
                     
                 with c_estado:
                     if cant_actual == 0:
@@ -305,13 +305,16 @@ else:
                 st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
 
 
-    # PESTAÑA 3: PORCENTAJES DE LLENADO
+    # PESTAÑA 3: PORCENTAJES DE LLENADO (Lazy loading absoluto)
     with menu_principal[2]:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
         sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
         
+        df_stats = st.session_state["df_album"].copy()
+        df_stats['tiene'] = df_stats['cantidad'].apply(lambda x: 1 if x > 0 else 0)
+        
         with sub_tabs[0]:
-            df_pag = df.groupby(['pagina', 'equipo', 'grupo']).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index().sort_values(by='pagina')
+            df_pag = df_stats.groupby(['pagina', 'equipo', 'grupo']).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index().sort_values(by='pagina')
             df_pag['Porcentaje'] = (df_pag['Adquiridas'] / df_pag['Total']) * 100
             df_pag['Sección del Álbum'] = df_pag.apply(lambda r: f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})", axis=1)
             st.dataframe(
@@ -322,7 +325,7 @@ else:
             )
 
         with sub_tabs[1]:
-            df_equipo = df.groupby(['equipo', 'grupo']).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum'), primera_pag=('pagina', 'min')).reset_index()
+            df_equipo = df_stats.groupby(['equipo', 'grupo']).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum'), primera_pag=('pagina', 'min')).reset_index()
             df_equipo['Porcentaje'] = (df_equipo['Adquiridas'] / df_equipo['Total']) * 100
             df_equipo_ordered = df_equipo.sort_values(by='primera_pag', ascending=True)
             st.dataframe(
@@ -333,7 +336,7 @@ else:
             )
 
         with sub_tabs[2]:
-            df_grupo = df.groupby('grupo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
+            df_grupo = df_stats.groupby('grupo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
             df_grupo['Porcentaje'] = (df_grupo['Adquiridas'] / df_grupo['Total']) * 100
             for _, fila in df_grupo.iterrows():
                 st.write(f"**{fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']} ({fila['Porcentaje']:.1f}%)")
