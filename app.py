@@ -67,7 +67,7 @@ def init_db():
 
 init_db()
 
-# Query de actualización incremental de inventario
+# Query de actualización incremental de inventario (Usa la columna real 'cantidad')
 def actualizar_cantidad(id_lamina, operacion):
     conn = get_connection()
     cur = conn.cursor()
@@ -79,9 +79,9 @@ def actualizar_cantidad(id_lamina, operacion):
     cur.close()
     conn.close()
 
-# EXTRAER DATOS CON CONVERSIÓN NUMÉRICA EXPLICITA DESDE POSTGRES
+# EXTRAER DATOS SIMPLE Y DIRECTO - CORREGIDO EL ENREDO DE QUANTITY
 conn = get_connection()
-df = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, quantity as cantidad FROM (SELECT id_lamina::INTEGER, equipo, grupo, descripcion, pagina, cantidad as quantity FROM album_2026) as t ORDER BY id_lamina ASC;", conn)
+df = pd.read_sql_query("SELECT id_lamina::INTEGER, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina ASC;", conn)
 conn.close()
 
 # Procesamiento analítico del inventario actual
@@ -149,7 +149,7 @@ else:
             st.rerun()
 
     # ==========================================================
-    # 📑 MENÚ DE PESTAÑAS PRINCIPALES (ORDEN MODIFICADO)
+    # 📑 MENÚ DE PESTAÑAS PRINCIPALES
     # ==========================================================
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
@@ -161,7 +161,7 @@ else:
         st.markdown(f"<p style='text-align: center; margin-bottom: 5px; font-weight: bold; font-size: 15px;'>📊 Progreso General: {progreso_gen:.1f}% ({total_tengo} / {total_laminas} láminas)</p>", unsafe_allow_html=True)
         st.progress(progreso_gen / 100)
         
-        # Bloque de Métricas Adaptable ("REPES" cambiado a "REPETIDAS")
+        # Bloque de Métricas Adaptable
         st.markdown(f"""
         <div style='display: flex; justify-content: space-around; text-align: center; background-color: #f0f2f6; padding: 10px; border-radius: 8px; margin-top: 5px; margin-bottom: 15px;'>
             <div><b style='font-size: 11px; color: #2ecc71;'>✅ TENGO</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_tengo} láminas</span></div>
@@ -190,7 +190,7 @@ else:
 
 
     # ----------------------------------------------------------
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (AHORA DE SEGUNDA)
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS
     # ----------------------------------------------------------
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
@@ -228,7 +228,7 @@ else:
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"] + [f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})" for _, r in lista_paginas_nav.iterrows()]
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
 
-        # Filtro de Estado de Inventario ("REPES" cambiado a "Repetidas")
+        # Filtro de Estado de Inventario
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
         # --- REGLAS DE NEGOCIO SOBRE EL DATASET ---
@@ -304,7 +304,7 @@ else:
 
 
     # ----------------------------------------------------------
-    # PESTAÑA 3: PORCENTAJES DE LLENADO (AHORA DE TERCERA)
+    # PESTAÑA 3: PORCENTAJES DE LLENADO
     # ----------------------------------------------------------
     with menu_principal[2]:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
