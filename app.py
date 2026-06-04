@@ -4,18 +4,18 @@ from urllib.parse import quote
 import pandas as pd
 import os
 
-# 1. CONEXIÓN A LA BASE DE DATOS RELACIONAL
+# 1. CONEXIÓN A LA BASE DE DATOS
 DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d8gfnpnlk1mc73er3tc0-a.virginia-postgres.render.com/db_album_2026"
 
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# Sincronizar el modelo físico con los 735 registros oficiales del Excel
+# Sincronización inicial estricta con el modelo del Excel
 def init_db():
     conn = get_connection()
     cur = conn.cursor()
     
-    # Validar si la tabla ya está poblada con las 735 láminas reales para mantener persistencia
+    # Validar si ya existen los 735 registros para no borrar el progreso del usuario
     tabla_lista = False
     try:
         cur.execute("SELECT COUNT(*) FROM album_2026;")
@@ -28,7 +28,7 @@ def init_db():
         cur.execute("DROP TABLE IF EXISTS album_2026;") 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS album_2026 (
-                id_lamina VARCHAR(50) PRIMARY KEY,
+                id_lamina INT PRIMARY KEY, -- Cambiado a INT para garantizar orden numérico estricto
                 equipo VARCHAR(100),
                 grupo VARCHAR(50),
                 descripcion VARCHAR(150),
@@ -37,7 +37,6 @@ def init_db():
             );
         """)
         
-        # Nombre exacto del archivo subido en tu repositorio de GitHub
         archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
         
         try:
@@ -45,7 +44,7 @@ def init_db():
             laminas_iniciales = []
             for _, fila in df_excel.iterrows():
                 laminas_iniciales.append((
-                    str(fila['Laminas']).strip(),
+                    int(fila['Laminas']), # Forzado a entero numérico
                     str(fila['Equipo']).strip(),
                     str(fila['Grupo']).strip(),
                     str(fila['Descripicion']).strip(),
@@ -59,15 +58,15 @@ def init_db():
             conn.commit()
         except Exception as e:
             conn.rollback()
-            st.error(f"Error cargando archivo fuente en PostgreSQL: {e}")
+            st.error(f"Error cargando archivo fuente: {e}")
             
     cur.close()
     conn.close()
 
-# Inicializar esquema
+# Ejecutar inicialización
 init_db()
 
-# Query dinámico de actualización de inventario desde la interfaz móvil
+# Query de actualización incremental
 def actualizar_cantidad(id_lamina, operacion):
     conn = get_connection()
     cur = conn.cursor()
@@ -79,16 +78,16 @@ def actualizar_cantidad(id_lamina, operacion):
     cur.close()
     conn.close()
 
-# Cargar el set de datos completo en memoria usando Pandas
+# EXTRAER DATOS ORDENADOS POR ID CONSECUTIVO DEL ÁLBUM (1 al 735)
 conn = get_connection()
-df = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY pagina, id_lamina;", conn)
+df = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina ASC;", conn)
 conn.close()
 
-# Procesamiento analítico de estados
+# Métricas de procesamiento
 df['tiene'] = df['cantidad'].apply(lambda x: 1 if x > 0 else 0)
 df['es_repetida'] = df['cantidad'].apply(lambda x: x - 1 if x > 1 else 0)
 
-faltan_lista = df[df['cantidad'] == 0]['id_lamina'].tolist()
+faltan_lista = df[df['cantidad'] == 0]['id_lamina'].astype(str).tolist()
 repes_dict = df[df['cantidad'] > 1].set_index('id_lamina')['es_repetida'].to_dict()
 
 total_laminas = len(df)
@@ -97,127 +96,119 @@ total_faltan = total_laminas - total_tengo
 total_repes = df['es_repetida'].sum()
 progreso_gen = (total_tengo / total_laminas) * 100 if total_laminas > 0 else 0
 
-# --- INTERFAZ DE USUARIO (STREAMLIT UI) ---
+# --- INTERFAZ GRÁFICA ---
 if os.path.exists("logo.jpg"):
     st.image("logo.jpg", use_container_width=True)
 
-st.title("🏆 Mi Álbum - Copa Mundo 2026")
-st.write("Análisis estadístico y gestión de inventario en tiempo real.")
+st.title("🏆 Mi Álbum - Secuencia Real 2026")
+st.write("Control indexado en el orden exacto de las páginas físicas de tu álbum.")
 
-# --- METRICAS DE PROGRESO TOTAL DEL ALBUM ---
+# Panel de Control Superior
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Progreso Álbum", f"{progreso_gen:.1f}%")
 col2.metric("Tengo (Únicas)", f"{total_tengo}/{total_laminas}")
 col3.metric("Faltantes", total_faltan)
 col4.metric("Total Repetidas", total_repes)
-
 st.progress(progreso_gen / 100)
 
-# --- PANEL DE PORCENTAJES REQUERIDOS (GRUPO, EQUIPO, PAGINA) ---
+# --- 📊 SECCIÓN DE PORCENTAJES REALES SOLICITADOS ---
 st.write("---")
-st.subheader("📊 Estadísticas de Llenado")
+st.subheader("📈 Estadísticas de Llenado por Parámetros")
 
-tab_grupo, tab_equipo, tab_pagina = st.tabs(["🗂️ % Por Grupo", "🛡️ % Por Equipo", "📄 % Por Página"])
+tab_paginas, tab_equipos, tab_grupos = st.tabs(["📄 % Por Página", "🛡️ % Por Equipo", "🗂️ % Por Grupo"])
 
-with tab_grupo:
-    st.write("**Porcentaje de completado por Grupos oficiales:**")
-    df_grupo = df.groupby('grupo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
-    df_grupo['Porcentaje'] = (df_grupo['Adquiridas'] / df_grupo['Total']) * 100
-    
-    # Mostrar como lista limpia con barras de progreso individuales
-    for _, fila in df_grupo.iterrows():
-        col_g1, col_g2 = st.columns([1, 3])
-        with col_g1:
-            st.write(f"**{fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']}")
-        with col_g2:
-            st.progress(fila['Porcentaje'] / 100, text=f"{fila['Porcentaje']:.1f}%")
-
-with tab_equipo:
-    st.write("**Porcentaje de avance individual por Selección:**")
-    df_equipo = df.groupby('equipo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
-    df_equipo['Porcentaje'] = (df_equipo['Adquiridas'] / df_equipo['Total']) * 100
-    
-    # Ordenar de mayor a menor progreso para identificar cuáles selecciones están cerca de completarse
-    df_equipo_sorted = df_equipo.sort_values(by='Porcentaje', ascending=False)
-    st.dataframe(
-        df_equipo_sorted.rename(columns={'equipo': 'Selección', 'Total': 'Láminas Totales', 'Adquiridas': 'Tengo'}).style.format({'Porcentaje': '{:.1f}%'}),
-        use_container_width=True,
-        hide_index=True
-    )
-
-with tab_pagina:
-    st.write("**Porcentaje de llenado por cada Página física del Álbum:**")
+with tab_paginas:
+    st.write("**Progreso calculado por hojas físicas del álbum (Pág 1 a la 47):**")
     df_pag = df.groupby('pagina').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
     df_pag['Porcentaje'] = (df_pag['Adquiridas'] / df_pag['Total']) * 100
-    
     st.dataframe(
-        df_pag.rename(columns={'pagina': 'Nº Página', 'Total': 'Láminas en Página', 'Adquiridas': 'Pegadas'}).style.format({'Porcentaje': '{:.1f}%'}),
-        use_container_width=True,
-        hide_index=True
+        df_pag.rename(columns={'pagina': 'Nº Página', 'Total': 'Láminas Totales', 'Adquiridas': 'Pegadas'}).style.format({'Porcentaje': '{:.1f}%'}),
+        use_container_width=True, hide_index=True
     )
 
-# --- CONTROL VISUAL AVANZADO (TENGO, FALTANTES, REPETIDAS) ---
+with tab_equipos:
+    st.write("**Porcentaje de avance por cada Selección / Categoría:**")
+    df_equipo = df.groupby('equipo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
+    df_equipo['Porcentaje'] = (df_equipo['Adquiridas'] / df_equipo['Total']) * 100
+    st.dataframe(
+        df_equipo.sort_values(by='Porcentaje', ascending=False).rename(columns={'equipo': 'Equipo/Sección', 'Total': 'Total Láminas', 'Adquiridas': 'Tengo'}).style.format({'Porcentaje': '{:.1f}%'}),
+        use_container_width=True, hide_index=True
+    )
+
+with tab_grupos:
+    st.write("**Porcentaje por Grupos del Torneo:**")
+    df_grupo = df.groupby('grupo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
+    df_grupo['Porcentaje'] = (df_grupo['Adquiridas'] / df_grupo['Total']) * 100
+    for _, fila in df_grupo.iterrows():
+        st.write(f"**{fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']} ({fila['Porcentaje']:.1f}%)")
+        st.progress(fila['Porcentaje'] / 100)
+
+
+# --- 🔍 FILTROS GLOBALES DE VISUALIZACIÓN ---
 st.write("---")
-st.subheader("🔍 Cuadrícula Interactiva de Control")
+st.subheader("⚙️ Navegador del Álbum")
 
-# Filtros combinados de visualización
-col_f1, col_f2 = st.columns(2)
-with col_f1:
-    grupo_seleccionado = st.selectbox("Selecciona un Grupo / Sección:", sorted(df['grupo'].unique()))
-with col_f2:
-    estado_filtro = st.radio("Ver láminas:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
+col_nav1, col_nav2 = st.columns(2)
+with col_nav1:
+    # Agrupamos por Página y mostramos el Equipo correspondiente para fácil navegación
+    lista_paginas = df.groupby(['pagina', 'equipo']).size().reset_index()
+    opciones_combo = [f"Pág. {r['pagina']} - {r['equipo']}" for _, r in lista_paginas.iterrows()]
+    seleccion_combo = st.selectbox("Ir a la sección del álbum:", opciones_combo)
+    pagina_seleccionada = int(seleccion_combo.split(" ")[1])
 
-# Aplicar filtros al DataFrame en memoria
-df_view = df[df['grupo'] == grupo_seleccionado]
+with col_nav2:
+    filtro_inventario = st.radio("Filtrar láminas visualizadas:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-if estado_filtro == "Solo Faltantes 🚨":
-    df_view = df_view[df_view['cantidad'] == 0]
-elif estado_filtro == "Solo las que Tengo ✅":
-    df_view = df_view[df_view['cantidad'] > 0]
-elif estado_filtro == "Solo Repetidas 🔁":
-    df_view = df_view[df_view['cantidad'] > 1]
+# Filtrar datos de la página elegida
+df_pagina_view = df[df['pagina'] == pagina_seleccionada]
 
-# Renderizar cuadrícula agrupada por equipo dentro del grupo seleccionado
-equipos_render = sorted(df_view['equipo'].unique())
+# Aplicar el filtro de inventario (Tengo, Faltan, Repes)
+if filtro_inventario == "Solo Faltantes 🚨":
+    df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
+elif filtro_inventario == "Solo las que Tengo ✅":
+    df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 0]
+elif filtro_inventario == "Solo Repetidas 🔁":
+    df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
 
-if not equipos_render:
-    st.info("No hay láminas en esta sección que coincidan con el filtro seleccionado.")
+# --- 🖼️ CUADRÍCULA DE LÁMINAS EN ORDEN SECUENCIAL ---
+if df_pagina_view.empty:
+    st.info("No hay láminas en esta página que coincidan con el filtro seleccionado.")
 else:
-    for eq in equipos_render:
-        with st.expander(f"🚩 {eq}"):
-            laminas_render = df_view[df_view['equipo'] == eq].to_dict('records')
-            cols = st.columns(3)
+    # Mostramos las láminas en filas de 3 columnas manteniendo el orden secuencial estricto
+    laminas_pagina = df_pagina_view.to_dict('records')
+    cols = st.columns(3)
+    
+    for idx, lam in enumerate(laminas_pagina):
+        with cols[idx % 3]:
+            st.markdown(f"### 🎫 Nº {lam['id_lamina']}")
+            st.markdown(f"**{lam['descripcion']}**")
+            st.caption(f"_{lam['equipo']}_ • Grupo {lam['grupo']}")
             
-            for idx, lam in enumerate(laminas_render):
-                with cols[idx % 3]:
-                    st.markdown(f"**Lámina {lam['id_lamina']}**")
-                    st.caption(f"_{lam['descripcion']}_ • Pág. {lam['pagina']}")
-                    
-                    # Estilo dinámico según inventario real
-                    if lam['cantidad'] == 1:
-                        st.success("La tengo (x1)")
-                    elif lam['cantidad'] > 1:
-                        st.warning(f"Repetidas: {lam['cantidad'] - 1}")
-                    else:
-                        st.error("Falta 🚨")
-                    
-                    # Botones incrementales
-                    c1, c2 = st.columns(2)
-                    if c1.button("➕", key=f"add_{lam['id_lamina']}"):
-                        actualizar_cantidad(lam['id_lamina'], "sumar")
-                        st.rerun()
-                    if c2.button("➖", key=f"sub_{lam['id_lamina']}"):
-                        actualizar_cantidad(lam['id_lamina'], "restar")
-                        st.rerun()
+            # Badges visuales
+            if lam['cantidad'] == 0:
+                st.error("Falta 🚨")
+            elif lam['cantidad'] == 1:
+                st.success("La tengo ✅")
+            else:
+                st.warning(f"Repes: {lam['cantidad'] - 1} 🔁")
+            
+            # Botones de control
+            c1, c2 = st.columns(2)
+            if c1.button("➕", key=f"add_{lam['id_lamina']}"):
+                actualizar_cantidad(lam['id_lamina'], "sumar")
+                st.rerun()
+            if c2.button("➖", key=f"sub_{lam['id_lamina']}"):
+                actualizar_cantidad(lam['id_lamina'], "restar")
+                st.rerun()
 
-# --- COMPARTIR REPORTE POR WHATSAPP ---
+# --- 📲 COMPARTIR REPORTE POR WHATSAPP ---
 st.write("---")
-st.subheader("📲 Compartir Reporte con Amigos")
-faltantes_str = ", ".join(faltan_lista[:50]) + ("..." if len(faltan_lista) > 50 else "")
-repetidas_str = ", ".join([f"{k}(x{v})" for k, v in repes_dict.items()][:50]) if repes_dict else "Ninguna 👍"
+st.subheader("📲 Compartir Reporte Corto")
+faltantes_str = ", ".join(faltan_lista[:40]) + ("..." if len(faltan_lista) > 40 else "")
+repetidas_str = ", ".join([f"{k}(x{v})" for k, v in repes_dict.items()][:40]) if repes_dict else "Ninguna 👍"
 
-texto_ws = f"*Mi Reporte Álbum Real 2026* 🏆\n\n" \
-           f"📊 *Progreso General:* {progreso_gen:.1f}% ({total_tengo}/{total_laminas})\n" \
+texto_ws = f"*Mi Reporte Álbum Consecutivo 2026* 🏆\n\n" \
+           f"📊 *Progreso:* {progreso_gen:.1f}% ({total_tengo}/{total_laminas})\n" \
            f"📋 *FALTAN ({total_faltan}):* {faltantes_str}\n\n" \
            f"🔁 *REPETIDAS:* {repetidas_str}"
 
