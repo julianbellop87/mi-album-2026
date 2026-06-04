@@ -4,7 +4,7 @@ from urllib.parse import quote
 import pandas as pd
 import os
 
-# CONFIGURACIÓN DE PÁGINA ESENCIAL (Debe ser lo primero)
+# 1. CONFIGURACIÓN DE PÁGINA ESENCIAL
 st.set_page_config(page_title="Mi Álbum", layout="centered")
 
 DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d8gfnpnlk1mc73er3tc0-a.virginia-postgres.render.com/db_album_2026"
@@ -12,7 +12,7 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# 1. Inicialización única de la Base de Datos
+# Inicialización única de la base de datos en el arranque del contenedor
 @st.cache_resource
 def init_db_once():
     conn = get_connection()
@@ -61,7 +61,7 @@ def init_db_once():
 
 init_db_once()
 
-# 2. Carga del Inventario en Caché de Sesión Permanente (Evita caídas de sesión)
+# 2. CACHÉ DE SESIÓN PERMANENTE Y CONTROL DE CAMBIOS LOCALES
 if "df_album" not in st.session_state:
     conn = get_connection()
     df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
@@ -70,43 +70,45 @@ if "df_album" not in st.session_state:
     df_base['cantidad'] = df_base['cantidad'].astype(int)
     st.session_state["df_album"] = df_base.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
-# --- CALLBACKS OPTIMIZADOS (Modifican UI local al instante y luego impactan BD) ---
-def cb_sumar(id_lamina):
-    df_local = st.session_state["df_album"]
-    idx = df_local[df_local['id_lamina'] == id_lamina].index
+if "tiene_cambios" not in st.session_state:
+    st.session_state["tiene_cambios"] = False
+
+# --- CALLBACKS 100% LOCALES (Mili-segundos y aseguran refresco visual) ---
+def registrar_cambio_local(id_lamina, operacion):
+    idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
-        nueva_cant = int(df_local.loc[idx, 'cantidad'].values[0]) + 1
-        st.session_state["df_album"].loc[idx, 'cantidad'] = nueva_cant
-        # Guardado rápido sin bloquear el hilo de la UI
+        actual = int(st.session_state["df_album"].loc[idx, 'cantidad'].values[0])
+        if operacion == "sumar":
+            st.session_state["df_album"].loc[idx, 'cantidad'] = actual + 1
+            st.session_state["tiene_cambios"] = True
+        elif operacion == "restar" and actual > 0:
+            st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
+            st.session_state["tiene_cambios"] = True
+
+# --- FUNCIÓN DE SINCRONIZACIÓN FORZADA (Solo va al servidor cuando tú quieres) ---
+def forzar_sincronizacion_bd():
+    with st.spinner("Guardando lote de cambios en Postgres (Virginia)..."):
         try:
             conn = get_connection()
             cur = conn.cursor()
-            cur.execute("UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;", (nueva_cant, str(id_lamina)))
+            lote = []
+            for _, fila in st.session_state["df_album"].iterrows():
+                lote.append((int(fila['cantidad']), str(fila['id_lamina'])))
+            
+            # Un solo viaje transaccional optimizado para las 735 filas
+            cur.executemany(
+                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;",
+                lote
+            )
             conn.commit()
             cur.close()
             conn.close()
-        except:
-            pass
+            st.session_state["tiene_cambios"] = False
+            st.toast("¡Sincronización exitosa! 🏆 Todo guardado.", icon="💾")
+        except Exception as e:
+            st.error(f"Error al sincronizar: {e}")
 
-def cb_restar(id_lamina):
-    df_local = st.session_state["df_album"]
-    idx = df_local[df_local['id_lamina'] == id_lamina].index
-    if not idx.empty:
-        actual = int(df_local.loc[idx, 'cantidad'].values[0])
-        if actual > 0:
-            nueva_cant = actual - 1
-            st.session_state["df_album"].loc[idx, 'cantidad'] = nueva_cant
-            try:
-                conn = get_connection()
-                cur = conn.cursor()
-                cur.execute("UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;", (nueva_cant, str(id_lamina)))
-                conn.commit()
-                cur.close()
-                conn.close()
-            except:
-                pass
-
-# Clon dinámico para métricas y renderizado
+# Clon de lectura rápido para construir la analítica de la interfaz
 df = st.session_state["df_album"].copy()
 df['tiene'] = df['cantidad'].apply(lambda x: 1 if x > 0 else 0)
 df['es_repetida'] = df['cantidad'].apply(lambda x: x - 1 if x > 1 else 0)
@@ -123,7 +125,7 @@ progreso_gen = (total_tengo / total_laminas) * 100 if total_laminas > 0 else 0
 
 
 # ==========================================================
-# 🔐 GESTIÓN DE SEGURIDAD ESTABLE
+# 🔐 CONTROL DE ACCESO (PROTEGIDO)
 # ==========================================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -162,12 +164,23 @@ else:
             st.session_state["modo_rol"] = None
             if "df_album" in st.session_state:
                 del st.session_state["df_album"]
+            st.session_state["tiene_cambios"] = False
             st.rerun()
 
-    # PESTAÑAS ORIGINALES (Mantiene la posición gracias al control de callbacks)
+    # --- 🚨 TU SOLUCIÓN: PANEL DE CONTROL DE SINCRONIZACIÓN FIJO ---
+    if st.session_state["modo_rol"] == "admin":
+        if st.session_state["tiene_cambios"]:
+            st.warning("⚠️ Tienes modificaciones locales sin guardar en la nube.")
+            if st.button("💾 FORZAR SINCRONIZACIÓN CON EL SERVIDOR", type="primary", use_container_width=True):
+                forzar_sincronizacion_bd()
+                st.rerun()
+        else:
+            st.info("✅ Datos locales sincronizados con el servidor remoto.")
+
+    # PESTAÑAS ORIGINALES
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
-    # PESTAÑA 1: DASHBOARD
+    # PESTAÑA 1: GENERAL
     with menu_principal[0]:
         st.write("")
         st.markdown(f"<p style='text-align: center; margin-bottom: 5px; font-weight: bold; font-size: 15px;'>📊 Progreso General: {progreso_gen:.1f}% ({total_tengo} / {total_laminas} láminas)</p>", unsafe_allow_html=True)
@@ -196,7 +209,7 @@ else:
         link_t = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS ORIGINAL
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS ORIGINAL INTERACTIVO
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -205,7 +218,6 @@ else:
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
-        # Filtros Avanzados intactos
         with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=True):
             col_b1, col_b2 = st.columns(2)
             with col_b1:
@@ -277,6 +289,7 @@ else:
                     st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} (Grupo: {lam['grupo']}) • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
                     
                 with c_estado:
+                    # RENDERIZADO ASOCIADO AL ESTADO DE MEMORIA DIRECTA
                     if cant_actual == 0:
                         st.error("Falta 🚨")
                     elif cant_actual == 1:
@@ -288,9 +301,9 @@ else:
                     with c_controles:
                         btn_col1, btn_col2 = st.columns(2)
                         
-                        # SOLUCIÓN CLAVE: on_click nativo que redibuja la UI y actualiza la BD de forma segura
-                        btn_col1.button("➕", key=f"add_{id_l}", on_click=cb_sumar, args=(id_l,))
-                        btn_col2.button("➖", key=f"sub_{id_l}", on_click=cb_restar, args=(id_l,))
+                        # MODIFICACIÓN EN MEMORIA E INVOCACIÓN AL REDIBUJO AUTOMÁTICO
+                        btn_col1.button("➕", key=f"add_{id_l}", on_click=registrar_cambio_local, args=(id_l, "sumar"))
+                        btn_col2.button("➖", key=f"sub_{id_l}", on_click=registrar_cambio_local, args=(id_l, "restar"))
                             
                 st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
 
