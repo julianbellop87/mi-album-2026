@@ -1,181 +1,127 @@
 import streamlit as st
-import pandas as pd
-import os
+import psycopg2
+from urllib.parse import quote
 
-# Configuración de la página para celular y escritorio
-st.set_page_config(page_title="Mi Álbum 2026", layout="wide", initial_sidebar_state="collapsed")
+# 1. CONEXIÓN A LA BASE DE DATOS
+DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d8gfnpnlk1mc73er3tc0-a.virginia-postgres.render.com/db_album_2026"
 
-archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
-archivo_datos = "inventario_album_2026.csv"
-archivo_logo = "logo.jpg"  # El nombre de tu imagen subida
+def get_connection():
+    return psycopg2.connect(DB_URL)
 
-# --- MOSTRAR LOGO DE LA APLICACIÓN ---
-if os.path.exists(archivo_logo):
-    # Usamos columnas para centrar un poco el logo en la pantalla del celular
-    col_logo_1, col_logo_2, col_logo_3 = st.columns([1, 2, 1])
-    with col_logo_2:
-        st.image(archivo_logo, use_container_width=True)
+# Crear la tabla automáticamente si no existe al arrancar
+def init_db():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS album_2026 (
+            id_lamina VARCHAR(10) PRIMARY KEY,
+            seleccion VARCHAR(50),
+            cantidad INT DEFAULT 0
+        );
+    """)
+    
+    # Validar si ya hay datos; si está vacía, se inicializa el álbum
+    cur.execute("SELECT COUNT(*) FROM album_2026;")
+    if cur.fetchone()[0] == 0:
+        laminas_iniciales = []
+        # Estructura inicial de ejemplo con selecciones comunes y ligas locales (puedes adaptarla)
+        for sel in ["Nacional", "Medellin", "Junior", "America", "Millonarios", "ARG", "BRA", "COL", "ESP", "FRA", "GER"]:
+            for i in range(1, 20):
+                laminas_iniciales.append((f"{sel}{i}", sel))
+        cur.executemany("INSERT INTO album_2026 (id_lamina, seleccion) VALUES (%s, %s);", laminas_iniciales)
+    conn.commit()
+    cur.close()
+    conn.close()
 
-# 1. CARGAR Y PREPARAR DATOS
-@st.cache_data
-def cargar_base_album():
-    if os.path.exists(archivo_excel):
-        return pd.read_excel(archivo_excel)
-    else:
-        st.error(f"No se encontró el archivo {archivo_excel}. Por favor súbelo a GitHub.")
-        return pd.DataFrame(columns=["Laminas", "Pagina", "Equipo", "Grupo", "Descripicion"])
+# Ejecutar inicialización de tablas
+init_db()
 
-df_base = cargar_base_album()
+# Funciones para actualizar cantidades en tiempo real
+def actualizar_cantidad(id_lamina, operacion):
+    conn = get_connection()
+    cur = conn.cursor()
+    if operacion == "sumar":
+        cur.execute("UPDATE album_2026 SET cantidad = cantidad + 1 WHERE id_lamina = %s;", (id_lamina,))
+    elif operacion == "restar":
+        cur.execute("UPDATE album_2026 SET cantidad = GREATEST(0, cantidad - 1) WHERE id_lamina = %s;", (id_lamina,))
+    conn.commit()
+    cur.close()
+    conn.close()
 
-# Inicializar o cargar el inventario (Cantidad de cada lámina)
-if "inventario" not in st.session_state:
-    if os.path.exists(archivo_datos):
-        st.session_state.inventario = pd.read_csv(archivo_datos, index_col="Laminas")["Cantidad"].to_dict()
-    else:
-        st.session_state.inventario = {str(lamina): 0 for lamina in df_base["Laminas"].unique()}
+# Consultar el estado actual del álbum para renderizar la interfaz
+conn = get_connection()
+cur = conn.cursor()
+cur.execute("SELECT id_lamina, seleccion, cantidad FROM album_2026 ORDER BY seleccion, id_lamina;")
+datos = cur.fetchall()
+cur.close()
+conn.close()
 
-def guardar_datos():
-    df_guardar = pd.DataFrame(list(st.session_state.inventario.items()), columns=["Laminas", "Cantidad"])
-    df_guardar.to_csv(archivo_datos, index=False)
+# Clasificar láminas para métricas y el mensaje de WhatsApp
+tengo = [d[0] for d in datos if d[2] > 0]
+faltantes = [d[0] for d in datos if d[2] == 0]
+repetidas = {d[0]: d[2] - 1 for d in datos if d[2] > 1}
 
-# Unir la base con la cantidad actual del inventario
-df_completo = df_base.copy()
-df_completo["Laminas_Str"] = df_completo["Laminas"].astype(str)
-df_completo["Cantidad"] = df_completo["Laminas_Str"].map(st.session_state.inventario).fillna(0).astype(int)
+total_laminas = len(datos)
+progreso = (len(tengo) / total_laminas) * 100 if total_laminas > 0 else 0
 
-# 2. CÁLCULO DE MÉTRICAS GLOBALES
-total_laminas = len(df_completo)
-tengo = len(df_completo[df_completo["Cantidad"] > 0])
-faltan = total_laminas - tengo
-porcentaje_total = (tengo / total_laminas) * 100 if total_laminas > 0 else 0
-
-repetidas_unicas = df_completo[df_completo["Cantidad"] > 1]
-total_repetidas = (repetidas_unicas["Cantidad"] - 1).sum()
-
-# 3. INTERFAZ VISUAL
+# --- INTERFAZ WEB EN STREAMLIT ---
 st.title("🏆 Mi Álbum - Copa Mundo 2026")
-st.write(f"Gestiona tus láminas de forma rápida desde el celular.")
+st.write("Gestiona tus láminas en tiempo real desde el celular.")
 
-# Panel de Progreso General
-st.subheader("Progreso General del Álbum")
+# Panel de Métricas Principales
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Llenado", f"{porcentaje_total:.1f}%")
-col2.metric("Tengo", f"{tengo} / {total_laminas}")
-col3.metric("Faltan", f"{faltan}")
-col4.metric("Total Repetidas", f"{total_repetidas}")
+col1.metric("Progreso", f"{progreso:.1f}%")
+col2.metric("Tengo", len(tengo))
+col3.metric("Faltan", len(faltantes))
+col4.metric("Repetidas", sum(repetidas.values()))
 
-st.progress(int(porcentaje_total))
+# --- SECCIÓN Y BOTÓN DE WHATSAPP ---
+st.subheader("📲 Compartir Reporte")
 
-st.markdown("---")
+# Construcción de cadenas optimizadas para que el mensaje no quede infinitamente largo
+faltantes_str = ", ".join(faltantes[:40]) + ("..." if len(faltantes) > 40 else "")
+repetidas_list = [f"{k}(x{v})" for k, v in repetidas.items()]
+repetidas_str = ", ".join(repetidas_list[:40]) + ("..." if len(repetidas_list) > 40 else "") if repetidas_list else "Ninguna por ahora 👍"
 
-# PESTAÑAS DE LA APLICACIÓN
-tab1, tab2, tab3 = st.tabs(["📊 Ver por Secciones / Páginas", "🔍 Buscador e Inventario", "📋 Listas Rápidas"])
+texto_ws = f"*Mi Reporte Álbum 2026* 🏆\n\n" \
+           f"📊 *Progreso:* {progreso:.1f}% ({len(tengo)}/{total_laminas})\n" \
+           f"📋 *FALTAN ({len(faltantes)}):* {faltantes_str}\n\n" \
+           f"🔁 *REPETIDAS ({sum(repetidas.values())}):* {repetidas_str}"
 
-# --- PESTAÑA 1: VISTA POR SECCIONES Y PORCENTAJES ---
-with tab1:
-    st.subheader("Porcentaje de Llenado Detallado")
-    
-    criterio = st.radio("Visualizar progreso por:", ["Equipo", "Pagina", "Grupo"], horizontal=True)
-    
-    resumen = df_completo.groupby(criterio).agg(
-        Total=('Cantidad', 'count'),
-        Tengo=('Cantidad', lambda x: (x > 0).sum())
-    ).reset_index()
-    
-    resumen["Porcentaje"] = (resumen["Tengo"] / resumen["Total"]) * 100
-    
-    for _, fila in resumen.iterrows():
-        nombre_seccion = str(fila[criterio])
-        pct = fila["Porcentaje"]
-        st.write(f"**{criterio}: {nombre_seccion}** — {fila['Tengo']}/{fila['Total']} láminas ({pct:.1f}%)")
-        st.progress(int(pct))
+link_whatsapp = f"https://api.whatsapp.com/send?text={quote(texto_ws)}"
+st.markdown(f'<a href="{link_whatsapp}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366;color:white;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;font-weight:bold;">🟢 Enviar Listado por WhatsApp</button></a>', unsafe_allow_html=True)
 
-# --- PESTAÑA 2: BUSCADOR Y ASIGNACIÓN ---
-with tab2:
-    st.subheader("Asignar y Modificar Láminas")
-    
-    buscar = st.text_input("🔍 Buscar por Nombre, Número o Página:", "")
-    filtro_estado = st.selectbox("Filtrar por Estado:", ["Todas", "Faltantes", "Tengo", "Repetidas"])
-    
-    df_filtrado = df_completo.copy()
-    
-    if buscar:
-        df_filtrado = df_filtrado[
-            df_filtrado["Descripicion"].str.contains(buscar, case=False, na=False) | 
-            df_filtrado["Laminas_Str"].str.contains(buscar, case=False, na=False) |
-            df_filtrado["Pagina"].astype(str).str.contains(buscar, case=False, na=False)
-        ]
+st.write("---")
+
+# --- GRILLA INTERACTIVA ---
+st.subheader("🔍 Control de Láminas")
+
+# Agrupar las láminas de forma visual por su sección/país
+selecciones = sorted(list(set([d[1] for d in datos])))
+for sel in selecciones:
+    with st.expander(f"📍 {sel}"):
+        laminas_sel = [d for d in datos if d[1] == sel]
         
-    if filtro_estado == "Faltantes":
-        df_filtrado = df_filtrado[df_filtrado["Cantidad"] == 0]
-    elif filtro_estado == "Tengo":
-        df_filtrado = df_filtrado[df_filtrado["Cantidad"] > 0]
-    elif filtro_estado == "Repetidas":
-        df_filtrado = df_filtrado[df_filtrado["Cantidad"] > 1]
-
-    st.write(f"Mostrando {len(df_filtrado)} láminas:")
-    
-    for idx, row in df_filtrado.head(50).iterrows():
-        cod = row["Laminas_Str"]
-        cant_actual = row["Cantidad"]
-        
-        if cant_actual == 0:
-            estado_txt = "🔴 FALTANTE"
-        elif cant_actual == 1:
-            estado_txt = "🟢 TENGO"
-        else:
-            estado_txt = f"🔵 REPETIDA (+{cant_actual - 1})"
-            
-        with st.container():
-            col_info, col_btn1, col_btn2 = st.columns([2, 1, 1])
-            
-            with col_info:
-                st.write(f"**{cod}** - {row['Descripicion']}  \n*{row['Equipo']} | Grupo {row['Grupo']} | Pág. {row['Pagina']}* \n{estado_txt}")
-            
-            with col_btn1:
-                if st.button("➕ Añadir", key=f"add_{cod}"):
-                    if cod not in st.session_state.inventario:
-                        st.session_state.inventario[cod] = 0
-                    st.session_state.inventario[cod] += 1
-                    guardar_datos()
+        # Grilla adaptada para visualización móvil (4 columnas)
+        cols = st.columns(4)
+        for idx, lamina in enumerate(laminas_sel):
+            id_lam, _, cant = lamina
+            with cols[idx % 4]:
+                st.markdown(f"**{id_lam}**")
+                
+                # Badges dinámicos según el inventario
+                if cant == 1:
+                    st.success("La tengo")
+                elif cant > 1:
+                    st.warning(f"Repes: {cant - 1}")
+                else:
+                    st.error("Falta")
+                
+                # Controles incrementales y decrementales
+                c1, c2 = st.columns(2)
+                if c1.button("➕", key=f"add_{id_lam}"):
+                    actualizar_cantidad(id_lam, "sumar")
                     st.rerun()
-                    
-            with col_btn2:
-                if st.button("➖ Quitar", key=f"sub_{cod}"):
-                    if cod in st.session_state.inventario and st.session_state.inventario[cod] > 0:
-                        st.session_state.inventario[cod] -= 1
-                        guardar_datos()
-                        st.rerun()
-        st.markdown("---")
-        
-    if len(df_filtrado) > 50:
-        st.warning("Hay más de 50 láminas en este filtro. Refina la búsqueda para verlas todas.")
-
-# --- PESTAÑA 3: LISTAS RÁPIDAS PARA COMPARTIR ---
-with tab3:
-    st.subheader("📋 Listas de Texto (Ideales para pegar en WhatsApp)")
-    
-    col_lista1, col_lista2 = st.columns(2)
-    
-    with col_lista1:
-        st.write("**❌ FALTANTES**")
-        df_faltas = df_completo[df_completo["Cantidad"] == 0]
-        if not df_faltas.empty:
-            txt_faltas = ", ".join(df_faltas["Laminas_Str"].tolist())
-            st.text_area("Copia tus faltantes:", value=txt_faltas, height=200)
-        else:
-            st.write("¡Álbum lleno! No te falta ninguna.")
-            
-    with col_lista2:
-        st.write("**🔄 REPETIDAS**")
-        df_repes = df_completo[df_completo["Cantidad"] > 1]
-        if not df_repes.empty:
-            lista_repes = []
-            for _, r in df_repes.iterrows():
-                n_repes = r["Cantidad"] - 1
-                for _ in range(n_repes):
-                    lista_repes.append(r["Laminas_Str"])
-            txt_repes = ", ".join(lista_repes)
-            st.text_area("Copia tus repetidas:", value=txt_repes, height=200)
-        else:
-            st.write("No tienes repetidas aún.")
+                if c2.button("➖", key=f"sub_{id_lam}"):
+                    actualizar_cantidad(id_lam, "restar")
+                    st.rerun()
