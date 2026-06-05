@@ -1,4 +1,3 @@
-Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
