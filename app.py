@@ -1,3 +1,4 @@
+Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
@@ -157,7 +158,7 @@ else:
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
     # ------------------------------------------------------
-    # PESTAÑA 1: DASHBOARD GENERAL Y WHATSAPP
+    # PESTAÑA 1: DASHBOARD GENERAL (RESTAURADOS LOS 3 BOTONES)
     # ------------------------------------------------------
     with menu_principal[0]:
         df_gen = st.session_state["df_album"].copy()
@@ -188,18 +189,25 @@ else:
         
         st.markdown("<h6 style='text-align: center;'>📲 Enviar Reportes Directos a WhatsApp</h6>", unsafe_allow_html=True)
         
+        # Botón 1: Faltantes
         txt_faltan = f"*🚨 MIS FALTANTES - ÁLBUM 2026* 🏆\n\nProgreso: {progreso_gen:.1f}% ({total_tengo}/{total_laminas})\n\n📋 *Faltan:* " + ", ".join([str(x) for x in faltan_lista[:80]]) + ("..." if len(faltan_lista) > 80 else "")
         link_f = f"https://api.whatsapp.com/send?text={quote(txt_faltan)}"
         st.markdown(f'<a href="{link_f}" target="_blank"><button style="background-color:#E74C3C;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;margin-bottom:8px;">📋 Compartir Faltantes</button></a>', unsafe_allow_html=True)
 
+        # Botón 2: Repetidas
         lista_repes_format = [f"{k}(x{v})" for k, v in repes_dict.items()]
         txt_repes = f"*🔁 MIS REPETIDAS - ÁLBUM 2026* 🏆\n\nTengo {total_repes} repetidas:\n\n" + (", ".join(lista_repes_format[:80]) if lista_repes_format else "Ninguna por ahora 👍")
         link_r = f"https://api.whatsapp.com/send?text={quote(txt_repes)}"
         st.markdown(f'<a href="{link_r}" target="_blank"><button style="background-color:#F39C12;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;margin-bottom:8px;">🔁 Compartir Repetidas</button></a>', unsafe_allow_html=True)
 
+        # Botón 3: Restaurado "Lo Que Tengo"
+        txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026* 🏆\n\nMis láminas pegadas:\n\n" + ", ".join([str(x) for x in tengo_lista[:80]]) + ("..." if len(tengo_lista) > 80 else "")
+        link_t = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
+        st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
+
 
     # ------------------------------------------------------
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS 
+    # PESTAÑA 2: NAVEGADOR (CORREGIDO POR COMBO DESPLEGABLE)
     # ------------------------------------------------------
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
@@ -223,10 +231,14 @@ else:
         with st.expander("🔍 Buscador Rápido de Lámina", expanded=False):
             buscar_num = st.text_input("🔢 Digita el Número Exacto de Lámina:", value="", placeholder="Ej: 16")
 
-        # --- SELECTOR DE PÁGINAS CORREGIDO (1 a 49) ---
+        # --- 📄 CORRECCIÓN: SELECTOR POR COMBO (SELECTBOX) DEL 1 AL 49 ---
+        lista_paginas_combo = [f"Página {i}" for i in range(1, 50)]
+        
         col_pag1, col_pag2 = st.columns([2, 3])
         with col_pag1:
-            pagina_seleccionada = st.number_input("📄 Ir a la Página Física:", min_value=1, max_value=49, value=8, step=1)
+            # Desplegable limpio para elegir la hoja física sin escribir
+            seleccion_pagina_txt = st.selectbox("📖 Selecciona la Página:", lista_paginas_combo, index=7) # Por defecto Página 8
+            pagina_seleccionada = int(seleccion_pagina_txt.split(" ")[1])
         
         with col_pag2:
             equipos_en_pagina = df_nav[df_nav['pagina'] == pagina_seleccionada]['equipo'].unique()
@@ -234,7 +246,7 @@ else:
 
         filtro_inventario = st.radio("Ver de esta página:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        # Filtrado estricto por página del Excel
+        # Filtrado estricto por página de la fila del Excel
         df_pagina_view = df_nav[df_nav['pagina'] == pagina_seleccionada]
             
         if buscar_num.strip().isdigit():
@@ -249,7 +261,7 @@ else:
 
         df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
 
-        # --- 🖥️ OPCIÓN 2 (EDICIÓN MASIVA EN TABLA) ---
+        # --- 🖥️ OPCIÓN 2: MODO MASIVO EN TABLA COMPLETA ---
         modo_masivo = st.checkbox("🖥️ Activar Edición Masiva en Tabla (Recomendado para PC)", value=False)
 
         if df_pagina_view.empty:
@@ -293,11 +305,10 @@ else:
                             forzar_sincronizacion_bd()
                             st.rerun()
 
-            # --- 📱 OPCIÓN 1 PREDETERMINADA (PAGINACIÓN CÓMODA DE A 20 RESULTADOS) ---
+            # --- 📱 OPCIÓN 1: VISTA VERTICAL DE A 20 EN CELULAR ---
             else:
                 st.write("---")
                 
-                # Control del estado para la paginación interna de la vista (Cargar de a 20)
                 key_paginacion = f"limite_vista_pag_{pagina_seleccionada}"
                 if key_paginacion not in st.session_state:
                     st.session_state[key_paginacion] = 20
@@ -305,7 +316,6 @@ else:
                 limite_actual = st.session_state[key_paginacion]
                 df_bloque = df_pagina_view.head(limite_actual)
                 
-                # Renderizado del bloque actual
                 for _, lam in df_bloque.iterrows():
                     id_l = int(lam['id_lamina'])
                     cant_actual = lam['cantidad']
@@ -334,7 +344,6 @@ else:
                                 
                     st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
                 
-                # Botón "Cargar Más" si quedan elementos ocultos en esa página física
                 if len(df_pagina_view) > limite_actual:
                     if st.button("➕ Cargar Más Láminas de esta Página", use_container_width=True):
                         st.session_state[key_paginacion] += 20
