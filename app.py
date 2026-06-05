@@ -61,11 +61,9 @@ def init_db_once():
 
 init_db_once()
 
-# 2. CACHÉ DE SESIÓN LOCAL EN MEMORIA RAM
+# 2. CACHÉ DE SESIÓN LOCAL EN MEMORIA RAM (Consulta corregida sin "groupo")
 if "df_album" not in st.session_state:
     conn = get_connection()
-    df_base = pd.read_sql_query("SELECT id_lamina, equipo, groupo=grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
-    # Nota: Si en tu bd la columna se llama grupo, usamos alias o mapeo limpio
     df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
     conn.close()
     df_base['id_lamina'] = df_base['id_lamina'].astype(int)
@@ -76,7 +74,7 @@ if "df_album" not in st.session_state:
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
-# --- CALLBACKS EN MEMORIA ---
+# --- CALLBACKS EN MEMORIA (Modificación instantánea local) ---
 def registrar_cambio_local(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
@@ -88,7 +86,7 @@ def registrar_cambio_local(id_lamina, operacion):
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
 
-# --- SINCRONIZACIÓN BATCH ---
+# --- SINCRONIZACIÓN BATCH (Casteo explícito ::varchar para evitar fallos de tipo) ---
 def forzar_sincronizacion_bd():
     with st.spinner("Sincronizando lote completo con Postgres (Virginia)..."):
         try:
@@ -108,7 +106,7 @@ def forzar_sincronizacion_bd():
             st.session_state["tiene_cambios"] = False
             st.toast("¡Álbum guardado en la nube con éxito! 🏆", icon="💾")
         except Exception as e:
-            st.error(f"Error al sincronizar: {e}")
+            st.error(f"Error al sincronizar con la base de datos: {e}")
 
 
 # ==========================================================
@@ -200,12 +198,12 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (Solución definitiva al mapeo de páginas)
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
         else:
-            st.success("🔑 Modo Administrador Activo.")
+            st.success("🔑 Modo Admin Activo.")
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
@@ -242,8 +240,7 @@ else:
             with col_b6:
                 filtrar_equipos_ab = st.checkbox("👥 Ver solo Equipos A y B")
 
-        # --- CORRECCIÓN CRÍTICA DE PAGINACIÓN ---
-        # Agrupamos calculando el ID mínimo de lámina por cada combinación para ordenar exactamente según el flujo real del álbum
+        # Construcción del combo asociando estrictamente página e ID mínimo consecutivo
         secciones_mapeadas = df_nav.groupby(['pagina', 'equipo', 'grupo']).agg(id_min=('id_lamina', 'min')).reset_index()
         secciones_mapeadas = secciones_mapeadas.sort_values(by=['pagina', 'id_min']).reset_index(drop=True)
         
@@ -256,16 +253,13 @@ else:
 
         df_pagina_view = df_nav.copy()
         
-        # Lógica de visualización controlada
         if "Selecciona una Sección" in seleccion_combo and not buscar_num.strip() and buscar_equipo == "Todos los Equipos" and buscar_grupo == "Todos los Grupos" and buscar_por_pagina == "Todas las Páginas":
             df_pagina_view = df_pagina_view.head(20)
             st.info("💡 Mostrando una vista previa de 20 láminas. Selecciona una sección o usa los buscadores arriba para trabajar rápido.")
         elif "Ver Todo" not in seleccion_combo and "Selecciona una Sección" not in seleccion_combo:
-            # Extracción quirúrgica de la sección para evitar colisiones entre páginas
             partes_combo = seleccion_combo.split(" - ")
             num_pag_combo = int(partes_combo[0].replace("Pág. ", "").strip())
             equipo_combo = partes_combo[1].split(" (")[0].strip()
-            # Filtramos simultáneamente garantizando coincidencia perfecta por clave compuesta implícita (página + equipo)
             df_pagina_view = df_pagina_view[(df_pagina_view['pagina'] == num_pag_combo) & (df_pagina_view['equipo'] == equipo_combo)]
             
         if buscar_num.strip().isdigit():
@@ -317,6 +311,7 @@ else:
                 if st.session_state["modo_rol"] == "admin":
                     with c_controles:
                         btn_col1, btn_col2 = st.columns(2)
+                        # CAMBIO CLAVE: Llamamos únicamente a registrar_cambio_local para mantener la app veloz e inmune a fallos
                         btn_col1.button("➕", key=f"add_{id_l}", on_click=registrar_cambio_local, args=(id_l, "sumar"))
                         btn_col2.button("➖", key=f"sub_{id_l}", on_click=registrar_cambio_local, args=(id_l, "restar"))
                             
