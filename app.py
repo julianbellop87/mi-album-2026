@@ -1,4 +1,3 @@
-Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
@@ -62,7 +61,7 @@ def init_db_once():
 
 init_db_once()
 
-# 2. CACHÉ DE SESIÓN LOCAL EN MEMORIA RAM (Query corregido sin typos)
+# 2. CACHÉ DE SESIÓN LOCAL EN MEMORIA RAM (Corregido sin groupo)
 if "df_album" not in st.session_state:
     conn = get_connection()
     df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
@@ -71,7 +70,7 @@ if "df_album" not in st.session_state:
     df_base['cantidad'] = df_base['cantidad'].astype(int)
     df_base['pagina'] = df_base['pagina'].astype(int)
     
-    # Normalización para evitar espacios ocultos del Excel
+    # Limpieza higiénica de strings
     df_base['equipo'] = df_base['equipo'].str.strip()
     df_base['grupo'] = df_base['grupo'].str.strip()
     
@@ -92,7 +91,7 @@ def registrar_cambio_local(id_lamina, operacion):
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
 
-# --- SINCRONIZACIÓN BATCH (Con casteo explícito para evitar errores de tipo en Postgres) ---
+# --- SINCRONIZACIÓN BATCH ---
 def forzar_sincronizacion_bd():
     with st.spinner("Sincronizando lote completo con Postgres..."):
         try:
@@ -204,7 +203,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (Estructurado por Sección Consecutiva del Excel)
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (Corregido y con Secciones Consecutivas)
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -217,7 +216,7 @@ else:
             if st.session_state["tiene_cambios"]:
                 st.warning("⚠️ Tienes modificaciones locales sin guardar en la nube.")
                 if st.button("💾 FORZAR SINCRONIZACIÓN CON EL SERVIDOR", type="primary", use_container_width=True):
-                    forrar_sincronizacion_bd()
+                    forzar_sincronizacion_bd()
                     st.rerun()
             else:
                 st.info("✅ Datos locales sincronizados con el servidor remoto.")
@@ -240,25 +239,22 @@ else:
                 filtrar_escudos = st.checkbox("🛡️ Ver solo Escudos")
                 filtrar_equipos_ab = st.checkbox("👥 Ver solo Equipos A y B")
 
-        # --- GENERACIÓN DE SECCIONES SECUENCIALES REALES DESDE EL EXCEL ---
-        # Mapeamos las secciones únicas respetando estrictamente el orden secuencial de los números de lámina mínimos
+        # Mapeo secuencial basado en el número mínimo de lámina
         secciones_reales = df_nav.groupby(['equipo', 'grupo']).agg(id_min=('id_lamina', 'min'), pag_orig=('pagina', 'min')).reset_index()
         secciones_reales = secciones_reales.sort_values(by='id_min').reset_index(drop=True)
         
         opciones_combo = []
         for idx, r in secciones_reales.iterrows():
-            # Creamos una etiqueta limpia para que el combo sea intuitivo y no se desplace
             grupo_lbl = f" (Grupo {r['grupo']})" if str(r['grupo']).lower() != 'no aplica' else ""
             opciones_combo.append(f"Sección {idx+1}: {r['equipo']}{grupo_lbl}")
             
-        seleccion_combo = st.selectbox("📖 Selecciona la Sección del Álbum a Gestionar:", opciones_combo, index=1 if len(opciones_combo) > 1 else 0)
+        seleccion_combo = st.selectbox("📖 Selecciona la Sección del Álbum a Gestionar:", opciones_combo, index=0)
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        # Buscamos qué equipo y grupo corresponden a la sección seleccionada en el combo
         idx_seleccionado = opciones_combo.index(seleccion_combo)
         seccion_activa = secciones_reales.iloc[idx_seleccionado]
         
-        # Filtrado directo e indestructible por Equipo y Grupo exactos
+        # Filtro robusto por equipo y grupo exactos
         df_pagina_view = df_nav[(df_nav['equipo'] == seccion_activa['equipo']) & (df_nav['grupo'] == seccion_activa['grupo'])]
             
         if buscar_num.strip().isdigit():
@@ -295,7 +291,7 @@ else:
                     c_info, c_estado = st.columns([2.5, 1.5])
                 
                 with c_info:
-                    st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Pág. original: {lam['pagina']}</p>", unsafe_allow_html=True)
+                    st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Pág: {lam['pagina']}</p>", unsafe_allow_html=True)
                     
                 with c_estado:
                     if cant_actual == 0:
