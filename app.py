@@ -1,3 +1,4 @@
+Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
@@ -5,7 +6,7 @@ import pandas as pd
 import os
 
 # 1. CONFIGURACIÓN DE PÁGINA ESENCIAL
-st.set_page_config(page_title="Mi Álbum", layout="centered")
+st.set_page_config(page_title="Mi Álbum 2026", layout="centered")
 
 DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d8gfnpnlk1mc73er3tc0-a.virginia-postgres.render.com/db_album_2026"
 
@@ -61,7 +62,7 @@ def init_db_once():
 
 init_db_once()
 
-# 2. CACHÉ DE SESIÓN LOCAL EN MEMORIA RAM
+# 2. CACHÉ DE SESIÓN LOCAL EN MEMORIA RAM (Query corregido sin typos)
 if "df_album" not in st.session_state:
     conn = get_connection()
     df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
@@ -70,7 +71,7 @@ if "df_album" not in st.session_state:
     df_base['cantidad'] = df_base['cantidad'].astype(int)
     df_base['pagina'] = df_base['pagina'].astype(int)
     
-    # Normalización higiénica de strings para evitar errores de espacios en el Excel
+    # Normalización para evitar espacios ocultos del Excel
     df_base['equipo'] = df_base['equipo'].str.strip()
     df_base['grupo'] = df_base['grupo'].str.strip()
     
@@ -91,9 +92,9 @@ def registrar_cambio_local(id_lamina, operacion):
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
 
-# --- SINCRONIZACIÓN BATCH ---
+# --- SINCRONIZACIÓN BATCH (Con casteo explícito para evitar errores de tipo en Postgres) ---
 def forzar_sincronizacion_bd():
-    with st.spinner("Sincronizando lote completo con Postgres (Virginia)..."):
+    with st.spinner("Sincronizando lote completo con Postgres..."):
         try:
             conn = get_connection()
             cur = conn.cursor()
@@ -203,7 +204,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (Filtro robusto anti-espacios)
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (Estructurado por Sección Consecutiva del Excel)
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -216,7 +217,7 @@ else:
             if st.session_state["tiene_cambios"]:
                 st.warning("⚠️ Tienes modificaciones locales sin guardar en la nube.")
                 if st.button("💾 FORZAR SINCRONIZACIÓN CON EL SERVIDOR", type="primary", use_container_width=True):
-                    forzar_sincronizacion_bd()
+                    forrar_sincronizacion_bd()
                     st.rerun()
             else:
                 st.info("✅ Datos locales sincronizados con el servidor remoto.")
@@ -236,49 +237,36 @@ else:
                 lista_grupos_filtro = ["Todos los Grupos"] + sorted(list(df_nav['grupo'].unique()))
                 buscar_grupo = st.selectbox("🗂️ Filtrar por Grupo:", lista_grupos_filtro)
             with col_b4:
-                paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())]
-                buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
-
-            col_b5, col_b6 = st.columns(2)
-            with col_b5:
                 filtrar_escudos = st.checkbox("🛡️ Ver solo Escudos")
-            with col_b6:
                 filtrar_equipos_ab = st.checkbox("👥 Ver solo Equipos A y B")
 
-        # Agrupamos asegurando ordenamiento secuencial estricto por página e id_min inicial
-        secciones_mapeadas = df_nav.groupby(['pagina', 'equipo', 'grupo']).agg(id_min=('id_lamina', 'min')).reset_index()
-        secciones_mapeadas = secciones_mapeadas.sort_values(by=['pagina', 'id_min']).reset_index(drop=True)
+        # --- GENERACIÓN DE SECCIONES SECUENCIALES REALES DESDE EL EXCEL ---
+        # Mapeamos las secciones únicas respetando estrictamente el orden secuencial de los números de lámina mínimos
+        secciones_reales = df_nav.groupby(['equipo', 'grupo']).agg(id_min=('id_lamina', 'min'), pag_orig=('pagina', 'min')).reset_index()
+        secciones_reales = secciones_reales.sort_values(by='id_min').reset_index(drop=True)
         
-        opciones_combo = ["--- Selecciona una Sección (Recomendado para velocidad) ---", "Ver Todo el Álbum (⚠️ Lento en Celular)"]
-        for _, r in secciones_mapeadas.iterrows():
-            opciones_combo.append(f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})")
+        opciones_combo = []
+        for idx, r in secciones_reales.iterrows():
+            # Creamos una etiqueta limpia para que el combo sea intuitivo y no se desplace
+            grupo_lbl = f" (Grupo {r['grupo']})" if str(r['grupo']).lower() != 'no aplica' else ""
+            opciones_combo.append(f"Sección {idx+1}: {r['equipo']}{grupo_lbl}")
             
-        seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
+        seleccion_combo = st.selectbox("📖 Selecciona la Sección del Álbum a Gestionar:", opciones_combo, index=1 if len(opciones_combo) > 1 else 0)
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        df_pagina_view = df_nav.copy()
+        # Buscamos qué equipo y grupo corresponden a la sección seleccionada en el combo
+        idx_seleccionado = opciones_combo.index(seleccion_combo)
+        seccion_activa = secciones_reales.iloc[idx_seleccionado]
         
-        # --- CORRECCIÓN QUIRÚRGICA DEL FILTRO ---
-        if "Selecciona una Sección" in seleccion_combo and not buscar_num.strip() and buscar_equipo == "Todos los Equipos" and buscar_grupo == "Todos los Grupos" and buscar_por_pagina == "Todas las Páginas":
-            df_pagina_view = df_pagina_view.head(20)
-            st.info("💡 Mostrando una vista previa de 20 láminas. Selecciona una sección o usa los buscadores arriba para trabajar rápido.")
-        elif "Ver Todo" not in seleccion_combo and "Selecciona una Sección" not in seleccion_combo:
-            # Extraemos limpiamente el número de página y el nombre del equipo quitando espacios extras
-            partes_combo = seleccion_combo.split(" - ")
-            num_pag_combo = int(partes_combo[0].replace("Pág. ", "").strip())
-            equipo_combo = partes_combo[1].split(" (")[0].strip()
-            
-            # Filtramos aplicando .str.strip() para asegurar match exacto e indestructible
-            df_pagina_view = df_pagina_view[(df_pagina_view['pagina'] == num_pag_combo) & (df_pagina_view['equipo'].str.strip() == equipo_combo)]
+        # Filtrado directo e indestructible por Equipo y Grupo exactos
+        df_pagina_view = df_nav[(df_nav['equipo'] == seccion_activa['equipo']) & (df_nav['grupo'] == seccion_activa['grupo'])]
             
         if buscar_num.strip().isdigit():
             df_pagina_view = df_nav[df_nav['id_lamina'] == int(buscar_num.strip())]
         if buscar_equipo != "Todos los Equipos":
-            df_pagina_view = df_pagina_view[df_pagina_view['equipo'].str.strip() == buscar_equipo.strip()]
+            df_pagina_view = df_pagina_view[df_pagina_view['equipo'] == buscar_equipo.strip()]
         if buscar_grupo != "Todos los Grupos":
-            df_pagina_view = df_pagina_view[df_pagina_view['grupo'].str.strip() == buscar_grupo.strip()]
-        if buscar_por_pagina != "Todas las Páginas":
-            df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
+            df_pagina_view = df_pagina_view[df_pagina_view['grupo'] == buscar_grupo.strip()]
         if filtrar_escudos:
             df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.lower().str.contains('escudo', na=False)]
         if filtrar_equipos_ab:
@@ -294,7 +282,7 @@ else:
         df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
 
         if df_pagina_view.empty:
-            st.info("No se encontraron láminas con los filtros seleccionados.")
+            st.info("No se encontraron láminas en esta sección con los filtros activos.")
         else:
             st.write("---")
             for _, lam in df_pagina_view.iterrows():
@@ -307,7 +295,7 @@ else:
                     c_info, c_estado = st.columns([2.5, 1.5])
                 
                 with c_info:
-                    st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
+                    st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Pág. original: {lam['pagina']}</p>", unsafe_allow_html=True)
                     
                 with c_estado:
                     if cant_actual == 0:
