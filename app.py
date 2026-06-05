@@ -4,7 +4,7 @@ from urllib.parse import quote
 import pandas as pd
 import os
 
-# 1. CONFIGURACIÓN DE PÁGINA ESENCIAL (Debe ser lo primero)
+# 1. CONFIGURACIÓN DE PÁGINA ESENCIAL
 st.set_page_config(page_title="Mi Álbum", layout="centered")
 
 DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d8gfnpnlk1mc73er3tc0-a.virginia-postgres.render.com/db_album_2026"
@@ -12,7 +12,7 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# Inicialización única de la base de datos en el arranque del contenedor
+# Inicialización única de la base de datos
 @st.cache_resource
 def init_db_once():
     conn = get_connection()
@@ -68,12 +68,13 @@ if "df_album" not in st.session_state:
     conn.close()
     df_base['id_lamina'] = df_base['id_lamina'].astype(int)
     df_base['cantidad'] = df_base['cantidad'].astype(int)
+    df_base['pagina'] = df_base['pagina'].astype(int)
     st.session_state["df_album"] = df_base.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
-# --- CALLBACKS ULTRA-LIGEROS (Solo alteran la celda específica del array en memoria) ---
+# --- CALLBACKS EN MEMORIA ---
 def registrar_cambio_local(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
@@ -85,7 +86,7 @@ def registrar_cambio_local(id_lamina, operacion):
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
 
-# --- SINCRONIZACIÓN BAJO DEMANDA (BATCH EN UN SOLO VIAJE) ---
+# --- SINCRONIZACIÓN BATCH ---
 def forzar_sincronizacion_bd():
     with st.spinner("Sincronizando lote completo con Postgres (Virginia)..."):
         try:
@@ -109,7 +110,7 @@ def forzar_sincronizacion_bd():
 
 
 # ==========================================================
-# 🔐 GESTIÓN DE SEGURIDAD Y ACCESO
+# 🔐 GESTIÓN DE SEGURIDAD
 # ==========================================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -151,10 +152,9 @@ else:
             st.session_state["tiene_cambios"] = False
             st.rerun()
 
-    # CONTROL DE PESTAÑAS PRINCIPALES
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
-    # PESTAÑA 1: DASHBOARD (Lazy Loading - Solo calcula si estás aquí metido)
+    # PESTAÑA 1: DASHBOARD
     with menu_principal[0]:
         df_gen = st.session_state["df_album"].copy()
         df_gen['tiene'] = df_gen['cantidad'].apply(lambda x: 1 if x > 0 else 0)
@@ -198,7 +198,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (Optimización de CPU mediante paginación por defecto)
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (Corrección total de mapeo de páginas y equipos)
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -207,7 +207,6 @@ else:
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
-        # El botón de guardado vive encapsulado aquí adentro para no perder foco jamás
         if st.session_state["modo_rol"] == "admin":
             if st.session_state["tiene_cambios"]:
                 st.warning("⚠️ Tienes modificaciones locales sin guardar en la nube.")
@@ -224,12 +223,12 @@ else:
             with col_b1:
                 buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="", placeholder="Ej: 16")
             with col_b2:
-                lista_equipos_filtro = ["Todos los Equipos"] + list(df_nav.groupby('equipo', sort=False).first().index)
+                lista_equipos_filtro = ["Todos los Equipos"] + sorted(list(df_nav['equipo'].unique()))
                 buscar_equipo = st.selectbox("⚽ Filtrar por Equipo:", lista_equipos_filtro)
                 
             col_b3, col_b4 = st.columns(2)
             with col_b3:
-                lista_grupos_filtro = ["Todos los Grupos"] + list(df_nav['grupo'].unique())
+                lista_grupos_filtro = ["Todos los Grupos"] + sorted(list(df_nav['grupo'].unique()))
                 buscar_grupo = st.selectbox("🗂️ Filtrar por Grupo:", lista_grupos_filtro)
             with col_b4:
                 paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())]
@@ -241,22 +240,28 @@ else:
             with col_b6:
                 filtrar_equipos_ab = st.checkbox("👥 Ver solo Equipos A y B")
 
-        # Paginación protectora de CPU
-        lista_paginas_nav = df_nav.groupby(['pagina', 'equipo', 'grupo']).size().reset_index().sort_values(by='pagina')
-        opciones_combo = ["--- Selecciona una Sección (Recomendado para velocidad) ---", "Ver Todo el Álbum (⚠️ Lento en Celular)"] + [f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})" for _, r in lista_paginas_nav.iterrows()]
+        # MAPEO INMUTABLE: Construcción del combo asociando estrictamente la página real con su equipo sin cruces
+        secciones_mapeadas = df_nav.groupby(['pagina', 'equipo', 'grupo']).size().reset_index().sort_values(by='pagina')
+        opciones_combo = ["--- Selecciona una Sección (Recomendado para velocidad) ---", "Ver Todo el Álbum (⚠️ Lento en Celular)"]
+        for _, r in secciones_mapeadas.iterrows():
+            opciones_combo.append(f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})")
+            
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
-
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
+        # Filtrado de datos exacto
         df_pagina_view = df_nav.copy()
         
-        # Lógica de acotado de filas iniciales
-        if "Selecciona una Sección" in seleccion_combo and not buscar_num.strip():
+        if "Selecciona una Sección" in seleccion_combo and not buscar_num.strip() and buscar_equipo == "Todos los Equipos" and buscar_grupo == "Todos los Grupos" and buscar_por_pagina == "Todas las Páginas":
             df_pagina_view = df_pagina_view.head(20)
-            st.info("💡 Mostrando una vista previa de 20 láminas. Selecciona una página específica arriba para buscar y editar rápido.")
+            st.info("💡 Mostrando una vista previa de 20 láminas. Selecciona una sección o usa los buscadores arriba para trabajar rápido.")
         elif "Ver Todo" not in seleccion_combo and "Selecciona una Sección" not in seleccion_combo:
-            pagina_seleccionada = int(seleccion_combo.split(" ")[1])
-            df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == pagina_seleccionada]
+            # Separamos de forma segura tomando el número antes del guión
+            partes_combo = seleccion_combo.split(" - ")
+            num_pag_combo = int(partes_combo[0].replace("Pág. ", "").strip())
+            equipo_combo = partes_combo[1].split(" (")[0].strip()
+            # Filtramos simultáneamente por página y equipo para evitar colisiones de Equipos A y B
+            df_pagina_view = df_pagina_view[(df_pagina_view['pagina'] == num_pag_combo) & (df_pagina_view['equipo'] == equipo_combo)]
             
         if buscar_num.strip().isdigit():
             df_pagina_view = df_nav[df_nav['id_lamina'] == int(buscar_num.strip())]
@@ -284,7 +289,6 @@ else:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
             st.write("---")
-            # Bucle optimizado (Corre instantáneo al procesar pocos elementos por vista)
             for _, lam in df_pagina_view.iterrows():
                 id_l = int(lam['id_lamina'])
                 cant_actual = lam['cantidad']
@@ -314,7 +318,7 @@ else:
                 st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
 
 
-    # PESTAÑA 3: PORCENTAJES DE LLENADO (Lazy Loading analítico completo)
+    # PESTAÑA 3: PORCENTAJES DE LLENADO
     with menu_principal[2]:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
         sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
