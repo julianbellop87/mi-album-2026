@@ -64,6 +64,8 @@ init_db_once()
 # 2. CACHÉ DE SESIÓN LOCAL EN MEMORIA RAM
 if "df_album" not in st.session_state:
     conn = get_connection()
+    df_base = pd.read_sql_query("SELECT id_lamina, equipo, groupo=grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
+    # Nota: Si en tu bd la columna se llama grupo, usamos alias o mapeo limpio
     df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
     conn.close()
     df_base['id_lamina'] = df_base['id_lamina'].astype(int)
@@ -198,7 +200,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (Corrección total de mapeo de páginas y equipos)
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (Solución definitiva al mapeo de páginas)
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -240,8 +242,11 @@ else:
             with col_b6:
                 filtrar_equipos_ab = st.checkbox("👥 Ver solo Equipos A y B")
 
-        # MAPEO INMUTABLE: Construcción del combo asociando estrictamente la página real con su equipo sin cruces
-        secciones_mapeadas = df_nav.groupby(['pagina', 'equipo', 'grupo']).size().reset_index().sort_values(by='pagina')
+        # --- CORRECCIÓN CRÍTICA DE PAGINACIÓN ---
+        # Agrupamos calculando el ID mínimo de lámina por cada combinación para ordenar exactamente según el flujo real del álbum
+        secciones_mapeadas = df_nav.groupby(['pagina', 'equipo', 'grupo']).agg(id_min=('id_lamina', 'min')).reset_index()
+        secciones_mapeadas = secciones_mapeadas.sort_values(by=['pagina', 'id_min']).reset_index(drop=True)
+        
         opciones_combo = ["--- Selecciona una Sección (Recomendado para velocidad) ---", "Ver Todo el Álbum (⚠️ Lento en Celular)"]
         for _, r in secciones_mapeadas.iterrows():
             opciones_combo.append(f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})")
@@ -249,18 +254,18 @@ else:
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        # Filtrado de datos exacto
         df_pagina_view = df_nav.copy()
         
+        # Lógica de visualización controlada
         if "Selecciona una Sección" in seleccion_combo and not buscar_num.strip() and buscar_equipo == "Todos los Equipos" and buscar_grupo == "Todos los Grupos" and buscar_por_pagina == "Todas las Páginas":
             df_pagina_view = df_pagina_view.head(20)
             st.info("💡 Mostrando una vista previa de 20 láminas. Selecciona una sección o usa los buscadores arriba para trabajar rápido.")
         elif "Ver Todo" not in seleccion_combo and "Selecciona una Sección" not in seleccion_combo:
-            # Separamos de forma segura tomando el número antes del guión
+            # Extracción quirúrgica de la sección para evitar colisiones entre páginas
             partes_combo = seleccion_combo.split(" - ")
             num_pag_combo = int(partes_combo[0].replace("Pág. ", "").strip())
             equipo_combo = partes_combo[1].split(" (")[0].strip()
-            # Filtramos simultáneamente por página y equipo para evitar colisiones de Equipos A y B
+            # Filtramos simultáneamente garantizando coincidencia perfecta por clave compuesta implícita (página + equipo)
             df_pagina_view = df_pagina_view[(df_pagina_view['pagina'] == num_pag_combo) & (df_pagina_view['equipo'] == equipo_combo)]
             
         if buscar_num.strip().isdigit():
