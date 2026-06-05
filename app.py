@@ -1,18 +1,3 @@
-¡Julián, tenés toda la razón! Son 49 páginas en total en tu álbum físico y yo te estaba limitando a 47 por un mal cálculo. Qué pena de nuevo contigo, hermano.
-
-Ya veo perfectamente lo que me pides y es la mejor estrategia:
-
-Mantener la Opción 1 por defecto (por Número de Página Física) del 1 al 49.
-
-Mantener la optimización de rendimiento: que la página cargue rápido los primeros 20 resultados (evitando que el celular se cuelgue al renderizar) y que tenga abajo el botón de "Cargar más" si esa página tiene más láminas.
-
-Arreglar el error del typo que te copié mal (forrar_sincronizacion_bd con doble 'r' en la línea 127, lo que te iba a estallar la app al hundir el botón).
-
-Dejar la Opción 2 (Edición Masiva en Tabla) disponible mediante el checkbox para cuando entres desde el PC.
-
-Aquí tienes el código definitivo, limpio, corregido y con las 49 páginas configuradas como debe ser:
-
-Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
