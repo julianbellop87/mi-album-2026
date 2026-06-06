@@ -1,12 +1,3 @@
-Julián, qué pena con vos. En la imagen veo que te salió el pantallazo de error de Render con el UndefinedColumn: column "grupo" does not exist.
-
-Ese error te apareció porque en la versión anterior a esa, cuando escribí la consulta para crear la base de datos, puse group en inglés en lugar de grupo, y la consulta se reventó.
-
-Como el último código que te pasé ya no borra la base de datos ni usa esa consulta de creación, sino que hace un UPDATE directo y seguro fila por fila para acomodar las páginas sin tocar tus cantidades, al subir este último código ese error va a desaparecer por completo.
-
-Por si acaso, para que no tengas que buscar arriba y vayas a la fija, te dejo aquí el código limpio y seguro. Podés copiarlo todo con total tranquilidad:
-
-Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
