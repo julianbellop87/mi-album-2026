@@ -12,43 +12,61 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🛡️ LOGS DE ENDEREZAMIENTO SEGURO (SIN BORRAR NADA) ---
+# --- 🛡️ ENDEREZAMIENTO SEGURO DE COLUMNAS Y PÁGINAS (SIN BORRAR CANTIDADES) ---
 @st.cache_resource
-def actualizar_paginas_sin_borrar_datos():
+def reparar_estructura_y_actualizar_paginas():
     conn = get_connection()
     cur = conn.cursor()
     
+    # PASO 1: Reparar el nombre de la columna en Postgres si es que viene con el typo viejo
+    try:
+        # Si existe la columna vieja "groupo", la renombramos a "grupo" para que sea válida
+        cur.execute("""
+            DO $$ 
+            BEGIN 
+                IF EXISTS (
+                    SELECT 1 
+                    FROM information_schema.columns 
+                    WHERE table_name='album_2026' AND column_name='groupo'
+                ) THEN 
+                    ALTER TABLE album_2026 RENAME COLUMN groupo TO grupo;
+                END IF;
+            END $$;
+        """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+
+    # PASO 2: Actualizar las páginas, equipos y grupos cruzando con tu Excel actual
     archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     try:
-        # 1. Leemos tu Excel actual para sacar las páginas correctas
         df_excel = pd.read_excel(archivo_excel)
         
-        # 2. Preparamos un lote de actualización estricto por id_lamina
         lote_actualizacion = []
         for _, fila in df_excel.iterrows():
             lote_actualizacion.append((
-                int(fila['Pagina']),          # Nueva página correcta
-                str(fila['Equipo']).strip(),  # Nombre limpio
-                str(fila['Grupo']).strip(),   # Grupo limpio
-                int(fila['Laminas'])          # ID de la lámina (Filtro WHERE)
+                int(fila['Pagina']),          # Nueva página correcta del Excel
+                str(fila['Equipo']).strip(),  # Nombre limpio del equipo
+                str(fila['Grupo']).strip(),   # Grupo correcto
+                int(fila['Laminas'])          # ID de la lámina para el filtro WHERE
             ))
         
-        # 3. Ejecutamos un UPDATE masivo. Esto NO borra tus cantidades, solo endereza la ubicación
+        # Hacemos el UPDATE masivo. Tus cantidades ('cantidad') NO se tocan, se quedan intactas.
         cur.executemany(
             "UPDATE album_2026 SET pagina = %s, equipo = %s, grupo = %s WHERE id_lamina = %s;", 
             lote_actualizacion
         )
         conn.commit()
-        st.toast("¡Ubicación de páginas corregida con éxito sin perder tus datos! 📐", icon="🔄")
+        st.toast("¡Estructura y páginas corregidas con éxito sin tocar tu inventario! 📐", icon="🔄")
     except Exception as e:
         conn.rollback()
-        st.error(f"Aviso en re-mapeo de páginas: {e}")
+        st.error(f"Error en re-mapeo de datos: {e}")
         
     cur.close()
     conn.close()
 
-# Ejecutamos la corrección segura al arrancar
-actualizar_paginas_sin_borrar_datos()
+# Ejecutamos la reparación de la BD al arrancar la app
+reparar_estructura_y_actualizar_paginas()
 
 # 2. CARGA DE DATOS EN MEMORIA (Orden consecutivo matemático estricto)
 if "df_album" not in st.session_state:
@@ -225,7 +243,7 @@ else:
         
         col_pag1, col_pag2 = st.columns([2, 3])
         with col_pag1:
-            seleccion_pagina_txt = st.selectbox("📖 Selecciona la Página:", lista_paginas_combo, index=6) # Defecto Pág 7 (Qatar)
+            seleccion_pagina_txt = st.selectbox("📖 Selecciona la Página:", lista_paginas_combo, index=6) # Abre por defecto en Pág 7 (Qatar)
             pagina_seleccionada = int(seleccion_pagina_txt.split(" ")[1])
         
         with col_pag2:
