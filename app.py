@@ -12,55 +12,43 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# Inicialización única de la base de datos (Garantiza el amarre exacto Lámina -> Página)
+# --- 🛡️ LOGS DE ENDEREZAMIENTO SEGURO (SIN BORRAR NADA) ---
 @st.cache_resource
-def init_db_once():
+def actualizar_paginas_sin_borrar_datos():
     conn = get_connection()
     cur = conn.cursor()
-    tabla_lista = False
+    
+    archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     try:
-        cur.execute("SELECT COUNT(*) FROM album_2026;")
-        if cur.fetchone()[0] == 735:
-            tabla_lista = True
-    except:
+        # 1. Leemos tu Excel actual para sacar las páginas correctas
+        df_excel = pd.read_excel(archivo_excel)
+        
+        # 2. Preparamos un lote de actualización estricto por id_lamina
+        lote_actualizacion = []
+        for _, fila in df_excel.iterrows():
+            lote_actualizacion.append((
+                int(fila['Pagina']),          # Nueva página correcta
+                str(fila['Equipo']).strip(),  # Nombre limpio
+                str(fila['Grupo']).strip(),   # Grupo limpio
+                int(fila['Laminas'])          # ID de la lámina (Filtro WHERE)
+            ))
+        
+        # 3. Ejecutamos un UPDATE masivo. Esto NO borra tus cantidades, solo endereza la ubicación
+        cur.executemany(
+            "UPDATE album_2026 SET pagina = %s, equipo = %s, grupo = %s WHERE id_lamina = %s;", 
+            lote_actualizacion
+        )
+        conn.commit()
+        st.toast("¡Ubicación de páginas corregida con éxito sin perder tus datos! 📐", icon="🔄")
+    except Exception as e:
         conn.rollback()
-
-    if not tabla_lista:
-        cur.execute("DROP TABLE IF EXISTS album_2026;") 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS album_2026 (
-                id_lamina INT PRIMARY KEY,
-                equipo VARCHAR(100),
-                grupo VARCHAR(50),
-                descripcion VARCHAR(150),
-                pagina INT,
-                cantidad INT DEFAULT 0
-            );
-        """)
-        archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
-        try:
-            df_excel = pd.read_excel(archivo_excel)
-            laminas_iniciales = []
-            for _, fila in df_excel.iterrows():
-                laminas_iniciales.append((
-                    int(fila['Laminas']),
-                    str(fila['Equipo']).strip(),
-                    str(fila['Grupo']).strip(),
-                    str(fila['Descripicion']).strip(),
-                    int(fila['Pagina'])
-                ))
-            # CORREGIDO: Se cambia 'group' por 'grupo' para evitar el error de UndefinedColumn
-            cur.executemany(
-                "INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina) VALUES (%s, %s, %s, %s, %s);", 
-                laminas_iniciales
-            )
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
+        st.error(f"Aviso en re-mapeo de páginas: {e}")
+        
     cur.close()
     conn.close()
 
-init_db_once()
+# Ejecutamos la corrección segura al arrancar
+actualizar_paginas_sin_borrar_datos()
 
 # 2. CARGA DE DATOS EN MEMORIA (Orden consecutivo matemático estricto)
 if "df_album" not in st.session_state:
@@ -77,12 +65,11 @@ if "df_album" not in st.session_state:
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
-# --- GESTOR DE PAGINACIÓN INTERNA POR PÁGINA FÍSICA CORREGIDO A 15 ---
+# --- GESTOR DE PAGINACIÓN INTERNA POR PÁGINA FÍSICA A 15 LÁMINAS ---
 if "limites_paginas" not in st.session_state:
-    # Ajustado de raíz: Cada página física arranca mostrando un bloque cómodo de 15 láminas
     st.session_state["limites_paginas"] = {i: 15 for i in range(1, 50)}
 
-# --- CALLBACKS PARA MENÚ INDIVIDUAL (Opción 1) ---
+# --- CALLBACKS PARA MENÚ INDIVIDUAL ---
 def registrar_cambio_local(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
@@ -163,7 +150,7 @@ else:
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
     # ------------------------------------------------------
-    # PESTAÑA 1: DASHBOARD GENERAL (3 BOTONES PERFECTOS)
+    # PESTAÑA 1: DASHBOARD GENERAL
     # ------------------------------------------------------
     with menu_principal[0]:
         df_gen = st.session_state["df_album"].copy()
@@ -209,7 +196,7 @@ else:
 
 
     # ------------------------------------------------------
-    # PESTAÑA 2: NAVEGADOR (PAGINACIÓN LIMPIA DE A 15 LÁMINAS)
+    # PESTAÑA 2: NAVEGADOR
     # ------------------------------------------------------
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
@@ -238,7 +225,7 @@ else:
         
         col_pag1, col_pag2 = st.columns([2, 3])
         with col_pag1:
-            seleccion_pagina_txt = st.selectbox("📖 Selecciona la Página:", lista_paginas_combo, index=7) # Defecto Pág 8
+            seleccion_pagina_txt = st.selectbox("📖 Selecciona la Página:", lista_paginas_combo, index=6) # Defecto Pág 7 (Qatar)
             pagina_seleccionada = int(seleccion_pagina_txt.split(" ")[1])
         
         with col_pag2:
@@ -247,7 +234,6 @@ else:
 
         filtro_inventario = st.radio("Ver de esta página:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        # Filtrado por hoja física del Excel
         df_pagina_view = df_nav[df_nav['pagina'] == pagina_seleccionada]
             
         if buscar_num.strip().isdigit():
@@ -262,7 +248,7 @@ else:
 
         df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
 
-        # --- 🖥️ OPCIÓN 2: MODO MASIVO EN TABLA ---
+        # --- 🖥️ MODO MASIVO EN TABLA ---
         modo_masivo = st.checkbox("🖥️ Activar Edición Masiva en Tabla (Recomendado para PC)", value=False)
 
         if df_pagina_view.empty:
@@ -302,14 +288,13 @@ else:
                     
                     if st.session_state["tiene_cambios"]:
                         if st.button("💾 GUARDAR CAMBIOS MASIVOS EN LA NUBE", type="primary", use_container_width=True):
-                            forzar_sincronizacion_bd()
+                            forrar_sincronizacion_bd()
                             st.rerun()
 
-            # --- 📱 OPCIÓN 1: VISTA DE A 15 LÁMINAS CORREGIDA ---
+            # --- 📱 VISTA CELULAR (BLOQUES EXACTOS DE A 15) ---
             else:
                 st.write("---")
                 
-                # Carga el límite específico de esta página física (Inicia en 15)
                 limite_esta_pagina = st.session_state["limites_paginas"][pagina_seleccionada]
                 df_bloque = df_pagina_view.head(limite_esta_pagina)
                 
@@ -341,7 +326,6 @@ else:
                                 
                     st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
                 
-                # Si la página real tiene más láminas de las visibles, expande sumando otras 15 de manera segura
                 if len(df_pagina_view) > limite_esta_pagina:
                     if st.button("➕ Cargar Más Láminas de esta Página", use_container_width=True):
                         st.session_state["limites_paginas"][pagina_seleccionada] += 15
