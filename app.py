@@ -5,88 +5,74 @@ import pandas as pd
 import os
 
 # 1. CONFIGURACIÓN DE PÁGINA ESENCIAL
-st.set_page_config(page_title="Mi Álbum 2026", layout="centered")
+st.set_page_config(page_title="Mi Álbum", layout="centered")
 
 DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d8gfnpnlk1mc73er3tc0-a.virginia-postgres.render.com/db_album_2026"
 
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🛡️ SINCRONIZACIÓN INYECTADA DIRECTAMENTE (SIN ARCHIVOS EXTERNOS) ---
-def reparar_estructura_y_actualizar_paginas():
+@st.cache_resource
+def init_db_once():
     conn = get_connection()
     cur = conn.cursor()
-    
-    # PASO 1: Asegurar tipo de columna id_lamina a INT
+    tabla_lista = False
     try:
-        cur.execute("ALTER TABLE album_2026 ALTER COLUMN id_lamina TYPE INT USING id_lamina::integer;")
-        conn.commit()
-    except Exception:
-        conn.rollback()
-    
-    # PASO 2: Reparar columna grupo si existe el typo antiguo "groupo"
-    try:
-        cur.execute("""
-            DO $$ 
-            BEGIN 
-                IF EXISTS (
-                    SELECT 1 
-                    FROM information_schema.columns 
-                    WHERE table_name='album_2026' AND column_name='groupo'
-                ) THEN 
-                    ALTER TABLE album_2026 RENAME COLUMN groupo TO grupo;
-                END IF;
-            END $$;
-        """)
-        conn.commit()
-    except Exception:
+        cur.execute("SELECT COUNT(*) FROM album_2026;")
+        if cur.fetchone()[0] == 735:
+            tabla_lista = True
+    except:
         conn.rollback()
 
-    # PASO 3: Corrección matemática de páginas y grupos directo en SQL
-    # Cada página tiene exactamente 15 láminas. Estadios Pág 1, México Pág 2 (Grupo A)
-    try:
-        # Asigna la página dividiendo el ID de la lámina entre 15 y redondeando hacia arriba
-        cur.execute("UPDATE album_2026 SET pagina = CEIL(id_lamina / 15.0);")
-        
-        # Ajustamos los nombres de equipos y grupos base según tu estructura real
-        cur.execute("UPDATE album_2026 SET grupo = 'No aplica', equipo = 'Estadios' WHERE id_lamina BETWEEN 1 AND 15;")
-        cur.execute("UPDATE album_2026 SET grupo = 'A', equipo = 'México' WHERE id_lamina BETWEEN 16 AND 30;")
-        
-        # Corrección específica para Suiza en el Grupo B
-        cur.execute("UPDATE album_2026 SET grupo = 'B' WHERE LOWER(equipo) = 'suiza';")
-        
-        conn.commit()
-        st.toast("¡Base de datos sincronizada y corregida con éxito! 🏆", icon="🔄")
-    except Exception as e:
-        conn.rollback()
-        st.error(f"Error reestructurando la base de datos: {e}")
-        
+    if not tabla_lista:
+        cur.execute("DROP TABLE IF EXISTS album_2026;") 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS album_2026 (
+                id_lamina VARCHAR(50) PRIMARY KEY,
+                equipo VARCHAR(100),
+                grupo VARCHAR(50),
+                descripcion VARCHAR(150),
+                pagina INT,
+                cantidad INT DEFAULT 0
+            );
+        """)
+        archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
+        try:
+            df_excel = pd.read_excel(archivo_excel)
+            laminas_iniciales = []
+            for _, fila in df_excel.iterrows():
+                laminas_iniciales.append((
+                    str(int(fila['Laminas'])).strip(),
+                    str(fila['Equipo']).strip(),
+                    str(fila['Grupo']).strip(),
+                    str(fila['Descripicion']).strip(),
+                    int(fila['Pagina'])
+                ))
+            cur.executemany(
+                "INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina) VALUES (%s, %s, %s, %s, %s);", 
+                laminas_iniciales
+            )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
     cur.close()
     conn.close()
 
-# 2. FLUJO DE ARRANQUE SEGURO
-if "estructura_reparada" not in st.session_state:
-    reparar_estructura_y_actualizar_paginas()
-    st.session_state["estructura_reparada"] = True
+init_db_once()
 
+# 2. MEMORIA CACHÉ LOCAL ULTRA-RÁPIDA
 if "df_album" not in st.session_state:
     conn = get_connection()
-    df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina ASC;", conn)
+    df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
     conn.close()
     df_base['id_lamina'] = df_base['id_lamina'].astype(int)
     df_base['cantidad'] = df_base['cantidad'].astype(int)
-    df_base['pagina'] = df_base['pagina'].astype(int)
-    df_base['equipo'] = df_base['equipo'].str.strip()
-    df_base['grupo'] = df_base['grupo'].str.strip()
-    st.session_state["df_album"] = df_base
+    st.session_state["df_album"] = df_base.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
-if "limites_paginas" not in st.session_state:
-    st.session_state["limites_paginas"] = {i: 15 for i in range(1, 100)}
-
-# --- CALLBACKS PARA MENÚ INDIVIDUAL ---
+# --- CALLBACKS ULTRA-LIGEROS (Solo alteran la celda específica del array) ---
 def registrar_cambio_local(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
@@ -98,31 +84,30 @@ def registrar_cambio_local(id_lamina, operacion):
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
 
-# --- SINCRONIZACIÓN EN NUBE ---
+# --- SINCRONIZACIÓN BAJO DEMANDA (BATCH CORRECTION) ---
 def forzar_sincronizacion_bd():
-    with st.spinner("Sincronizando cambios con el servidor Postgres..."):
+    with st.spinner("Sincronizando lote completo con Postgres..."):
         try:
             conn = get_connection()
             cur = conn.cursor()
             lote = []
             for _, fila in st.session_state["df_album"].iterrows():
-                lote.append((int(fila['cantidad']), int(fila['id_lamina'])))
+                lote.append((int(fila['cantidad']), str(fila['id_lamina'])))
             
             cur.executemany(
-                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina = %s;",
+                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;",
                 lote
             )
             conn.commit()
             cur.close()
             conn.close()
             st.session_state["tiene_cambios"] = False
-            st.toast("¡Álbum sincronizado con éxito en la nube! 🏆", icon="💾")
+            st.toast("¡Álbum guardado en la nube con éxito! 🏆", icon="💾")
         except Exception as e:
-            st.error(f"Error crítico de sincronización: {e}")
-
+            st.error(f"Error al sincronizar: {e}")
 
 # ==========================================================
-# 🔐 GESTIÓN DE SEGURIDAD Y ACCESO
+# 🔐 SEGURIDAD
 # ==========================================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -152,7 +137,7 @@ if not st.session_state["autenticado"]:
             st.rerun()
 
 else:
-    st.markdown("<h2 style='text-align: center; margin-top: -10px; margin-bottom: 5px;'>🏆 Mi Álbum 2026</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; margin-top: -10px; margin-bottom: 5px;'>🏆 Mi Álbum</h2>", unsafe_allow_html=True)
     
     col_vacio, col_logout = st.columns([4, 1.2])
     with col_logout:
@@ -164,11 +149,10 @@ else:
             st.session_state["tiene_cambios"] = False
             st.rerun()
 
+    # PESTAÑAS
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
-    # ------------------------------------------------------
-    # PESTAÑA 1: DASHBOARD GENERAL
-    # ------------------------------------------------------
+    # PESTAÑA 1: DASHBOARD (Cálculo perezoso: Solo se ejecuta si abres esta pestaña)
     with menu_principal[0]:
         df_gen = st.session_state["df_album"].copy()
         df_gen['tiene'] = df_gen['cantidad'].apply(lambda x: 1 if x > 0 else 0)
@@ -212,16 +196,14 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # ------------------------------------------------------
-    # PESTAÑA 2: NAVEGADOR TOTALMENTE DINÁMICO
-    # ------------------------------------------------------
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (Aislado y optimizado para clics ultra veloces)
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
-            st.info("👁️ Modo Consulta Activo (Solo Lectura).")
+            st.info("👁️ Modo Consulta Activo.")
         else:
-            st.success("🔑 Modo Admin Activo.")
+            st.success("🔑 Modo Administrador Activo.")
 
-        st.markdown("<h4>⚙️ Gestión e Inventario Físico por Páginas</h4>", unsafe_allow_html=True)
+        st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
         if st.session_state["modo_rol"] == "admin":
             if st.session_state["tiene_cambios"]:
@@ -230,39 +212,56 @@ else:
                     forzar_sincronizacion_bd()
                     st.rerun()
             else:
-                st.info("✅ Todos los datos locales están perfectamente sincronizados.")
+                st.info("✅ Datos locales sincronizados con el servidor remoto.")
         
+        # Clon local exclusivo y liviano para filtros rápidos
         df_nav = st.session_state["df_album"]
         
-        with st.expander("🔍 Buscador Rápido de Lámina", expanded=False):
-            buscar_num = st.text_input("🔢 Digita el Número Exacto de Lámina:", value="", placeholder="Ej: 16")
+        with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=False):
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="", placeholder="Ej: 16")
+            with col_b2:
+                lista_equipos_filtro = ["Todos los Equipos"] + list(df_nav.groupby('equipo', sort=False).first().index)
+                buscar_equipo = st.selectbox("⚽ Filtrar por Equipo:", lista_equipos_filtro)
+                
+            col_b3, col_b4 = st.columns(2)
+            with col_b3:
+                lista_grupos_filtro = ["Todos los Grupos"] + list(df_nav['grupo'].unique())
+                buscar_grupo = st.selectbox("🗂️ Filtrar por Grupo:", lista_grupos_filtro)
+            with col_b4:
+                paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())]
+                buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
 
-        paginas_existentes = sorted(df_nav['pagina'].unique())
-        lista_paginas_combo = [f"Página {p}" for p in paginas_existentes]
-        
-        col_pag1, col_pag2 = st.columns([2, 3])
-        with col_pag1:
-            seleccion_pagina_txt = st.selectbox("📖 Selecciona la Página:", lista_paginas_combo) 
-            pagina_seleccionada = int(seleccion_pagina_txt.split(" ")[1])
-        
-        with col_pag2:
-            datos_pag = df_nav[df_nav['pagina'] == pagina_seleccionada]
-            if not datos_pag.empty:
-                info_equipos = []
-                for eq in datos_pag['equipo'].unique():
-                    gr = datos_pag[datos_pag['equipo'] == eq]['grupo'].values[0]
-                    if str(gr).lower() != 'no aplica':
-                        info_equipos.append(f"{eq} (Grupo {gr})")
-                    else:
-                        info_equipos.append(f"{eq}")
-                st.markdown(f"<p style='margin-top: 32px; font-weight: bold; color: #1E3A8A;'>⚽ Contenido: {' • '.join(info_equipos)}</p>", unsafe_allow_html=True)
+            col_b5, col_b6 = st.columns(2)
+            with col_b5:
+                filtrar_escudos = st.checkbox("🛡️ Ver solo Escudos")
+            with col_b6:
+                filtrar_equipos_ab = st.checkbox("👥 Ver solo Equipos A y B")
 
-        filtro_inventario = st.radio("Ver de esta página:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
+        lista_paginas_nav = df_nav.groupby(['pagina', 'equipo', 'grupo']).size().reset_index().sort_values(by='pagina')
+        opciones_combo = ["Ver Todo el Álbum (735 Láminas)"] + [f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})" for _, r in lista_paginas_nav.iterrows()]
+        seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
 
-        df_pagina_view = df_nav[df_nav['pagina'] == pagina_seleccionada]
-            
+        filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
+
+        # Filtrado veloz
+        df_pagina_view = df_nav.copy()
+        if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
+            pagina_seleccionada = int(seleccion_combo.split(" ")[1])
+            df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == pagina_seleccionada]
         if buscar_num.strip().isdigit():
-            df_pagina_view = df_nav[df_nav['id_lamina'] == int(buscar_num.strip())]
+            df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
+        if buscar_equipo != "Todos los Equipos":
+            df_pagina_view = df_pagina_view[df_pagina_view['equipo'] == buscar_equipo]
+        if buscar_grupo != "Todos los Grupos":
+            df_pagina_view = df_pagina_view[df_pagina_view['grupo'] == buscar_grupo]
+        if buscar_por_pagina != "Todas las Páginas":
+            df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
+        if filtrar_escudos:
+            df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.lower().str.contains('escudo', na=False)]
+        if filtrar_equipos_ab:
+            df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.lower().str.contains('equipo a|equipo b', na=False)]
 
         if filtro_inventario == "Solo Faltantes 🚨":
             df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
@@ -273,94 +272,40 @@ else:
 
         df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
 
-        modo_masivo = st.checkbox("🖥️ Activar Edición Masiva en Tabla (Recomendado para PC)", value=False)
-
         if df_pagina_view.empty:
-            st.info("No hay láminas que coincidan con el filtro en esta página.")
+            st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
-            if modo_masivo:
-                if st.session_state["modo_rol"] == "consulta":
-                    st.warning("👁️ El modo masivo en tabla requiere permisos de Administrador para editar.")
-                    st.dataframe(df_pagina_view[['id_lamina', 'descripcion', 'equipo', 'grupo', 'cantidad']], use_container_width=True, hide_index=True)
+            st.write("---")
+            for _, lam in df_pagina_view.iterrows():
+                id_l = int(lam['id_lamina'])
+                cant_actual = lam['cantidad']
+                
+                if st.session_state["modo_rol"] == "admin":
+                    c_info, c_estado, c_controles = st.columns([2, 1.2, 1])
                 else:
-                    st.write("💡 *Doble clic en 'cantidad', digita el número y navega rápido con las flechas.*")
-                    df_editable = df_pagina_view[['id_lamina', 'descripcion', 'equipo', 'cantidad']].copy()
-                    
-                    tabla_editada = st.data_editor(
-                        df_editable,
-                        column_config={
-                            "id_lamina": st.column_config.NumberColumn("Nº Lámina", disabled=True, format="%d"),
-                            "descripcion": st.column_config.TextColumn("Descripción", disabled=True),
-                            "equipo": st.column_config.TextColumn("Equipo", disabled=True),
-                            "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0, max_value=99, step=1, required=True)
-                        },
-                        use_container_width=True,
-                        hide_index=True,
-                        key=f"editor_pag_{pagina_seleccionada}"
-                    )
-                    
-                    for idx, fila in tabla_editada.iterrows():
-                        id_lam = int(fila['id_lamina'])
-                        nueva_cant = int(fila['cantidad'])
-                        
-                        idx_global = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lam].index[0]
-                        valor_actual_global = int(st.session_state["df_album"].loc[idx_global, 'cantidad'])
-                        
-                        if nueva_cant != valor_actual_global:
-                            st.session_state["df_album"].loc[idx_global, 'cantidad'] = nueva_cant
-                            st.session_state["tiene_cambios"] = True
-                    
-                    if st.session_state["tiene_cambios"]:
-                        if st.button("💾 GUARDAR CAMBIOS MASIVOS EN LA NUBE", type="primary", use_container_width=True):
-                            forzar_sincronizacion_bd()
-                            st.rerun()
-
-            else:
-                st.write("---")
+                    c_info, c_estado = st.columns([2.5, 1.5])
                 
-                if pagina_seleccionada not in st.session_state["limites_paginas"]:
-                    st.session_state["limites_paginas"][pagina_seleccionada] = 15
+                with c_info:
+                    st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
                     
-                limite_esta_pagina = st.session_state["limites_paginas"][pagina_seleccionada]
-                df_bloque = df_pagina_view.head(limite_esta_pagina)
-                
-                for _, lam in df_bloque.iterrows():
-                    id_l = int(lam['id_lamina'])
-                    cant_actual = lam['cantidad']
-                    
-                    if st.session_state["modo_rol"] == "admin":
-                        c_info, c_estado, c_controles = st.columns([2, 1.2, 1])
+                with c_estado:
+                    if cant_actual == 0:
+                        st.error("Falta 🚨")
+                    elif cant_actual == 1:
+                        st.success("Tengo ✅")
                     else:
-                        c_info, c_estado = st.columns([2.5, 1.5])
-                    
-                    with c_info:
-                        st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Grupo {lam['grupo']} • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
+                        st.warning(f"Repetidas: {cant_actual-1}")
                         
-                    with c_estado:
-                        if cant_actual == 0:
-                            st.error("Falta 🚨")
-                        elif cant_actual == 1:
-                            st.success("Tengo ✅")
-                        else:
-                            st.warning(f"Repetidas: {cant_actual-1}")
+                if st.session_state["modo_rol"] == "admin":
+                    with c_controles:
+                        btn_col1, btn_col2 = st.columns(2)
+                        btn_col1.button("➕", key=f"add_{id_l}", on_click=registrar_cambio_local, args=(id_l, "sumar"))
+                        btn_col2.button("➖", key=f"sub_{id_l}", on_click=registrar_cambio_local, args=(id_l, "restar"))
                             
-                    if st.session_state["modo_rol"] == "admin":
-                        with c_controles:
-                            btn_col1, btn_col2 = st.columns(2)
-                            btn_col1.button("➕", key=f"add_{id_l}", on_click=registrar_cambio_local, args=(id_l, "sumar"))
-                            btn_col2.button("➖", key=f"sub_{id_l}", on_click=registrar_cambio_local, args=(id_l, "restar"))
-                                
-                    st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
-                
-                if len(df_pagina_view) > limite_esta_pagina:
-                    if st.button("➕ Cargar Más Láminas de esta Página", use_container_width=True):
-                        st.session_state["limites_paginas"][pagina_seleccionada] += 15
-                        st.rerun()
+                st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
 
 
-    # ------------------------------------------------------
-    # PESTAÑA 3: PORCENTAJES DE LLENADO
-    # ------------------------------------------------------
+    # PESTAÑA 3: PORCENTAJES DE LLENADO (Lazy loading absoluto)
     with menu_principal[2]:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
         sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
@@ -394,5 +339,5 @@ else:
             df_grupo = df_stats.groupby('grupo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
             df_grupo['Porcentaje'] = (df_grupo['Adquiridas'] / df_grupo['Total']) * 100
             for _, fila in df_grupo.iterrows():
-                st.write(f"**Grupo {fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']} ({fila['Porcentaje']:.1f}%)")
+                st.write(f"**{fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']} ({fila['Porcentaje']:.1f}%)")
                 st.progress(fila['Porcentaje'] / 100)
