@@ -3,6 +3,7 @@ import psycopg2
 from urllib.parse import quote
 import pandas as pd
 import os
+import math
 
 # 1. CONFIGURACIÓN DE PÁGINA ESENCIAL
 st.set_page_config(page_title="Mi Álbum 2026", layout="centered")
@@ -12,70 +13,30 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🔄 RECONSTRUCCIÓN FORZADA (Sin decoradores que congelen el estado) ---
-def actualizar_base_de_datos_real():
-    conn = get_connection()
-    cur = conn.cursor()
-    
-    # 🚨 Eliminamos la tabla antigua por completo para romper el bucle del miércoles
-    cur.execute("DROP TABLE IF EXISTS album_2026;") 
-    cur.execute("""
-        CREATE TABLE album_2026 (
-            id_lamina INT PRIMARY KEY,
-            equipo VARCHAR(100),
-            grupo VARCHAR(50),
-            descripcion VARCHAR(150),
-            pagina INT,
-            cantidad INT DEFAULT 0
-        );
-    """)
-    
-    archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
-    try:
-        df_excel = pd.read_excel(archivo_excel)
-        laminas_iniciales = []
-        
-        for _, fila in df_excel.iterrows():
-            laminas_iniciales.append((
-                int(fila['Laminas']),
-                str(fila['Equipo']).strip(),
-                str(fila['Grupo']).strip(),
-                str(fila['Descripicion']).strip(), # Mantiene el nombre de columna del Excel
-                int(fila['Pagina'])
-            ))
-            
-        # Inserción limpia desde cero de las 735 filas actualizadas
-        cur.executemany(
-            "INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad) VALUES (%s, %s, %s, %s, %s, 0);", 
-            laminas_iniciales
-        )
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        st.error(f"Error procesando el archivo Excel: {e}")
-        
-    cur.close()
-    conn.close()
-
-# Forzamos a que corra la actualización limpia sin importar lo que hubiera en caché
-if "bd_inicializada_firme" not in st.session_state:
-    actualizar_base_de_datos_real()
-    st.session_state["bd_inicializada_firme"] = True
-
-# 2. CAPA DE SESIÓN LOCAL
+# --- 🚀 CONTROL TOTAL DE PAGINACIÓN DESDE PYTHON (NUNCA MÁS SE BORRAN DATOS) ---
 if "df_album" not in st.session_state:
     conn = get_connection()
-    df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina ASC;", conn)
+    # Leemos la base de datos tal cual está, sin alterar tablas
+    df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, cantidad FROM album_2026;", conn)
     conn.close()
+    
+    # Forzar que el ID de la lámina sea un número entero para poder ordenar bien
     df_base['id_lamina'] = df_base['id_lamina'].astype(int)
     df_base['cantidad'] = df_base['cantidad'].astype(int)
-    df_base['pagina'] = df_base['pagina'].astype(int)
+    
+    # 🎯 CORRECCIÓN DE PAGINACIÓN MANUAL Y MATEMÁTICA (15 láminas por página)
+    # Así garantizamos que Estadios (1-15) sea Pág 1, México (16-30) sea Pág 2...
+    df_base['pagina'] = df_base['id_lamina'].apply(lambda x: math.ceil(x / 15.0))
+    
+    # Ordenamos de forma consecutiva estricta (1, 2, 3... 735)
+    df_base = df_base.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
+    
     st.session_state["df_album"] = df_base
 
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
-# --- CALLBACKS DE INVENTARIO ---
+# --- CALLBACKS DE CONTEO ---
 def registrar_cambio_local(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
@@ -87,6 +48,7 @@ def registrar_cambio_local(id_lamina, operacion):
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
 
+# --- GUARDADO SEGURO ---
 def forzar_sincronizacion_bd():
     with st.spinner("Sincronizando con Postgres..."):
         try:
@@ -94,10 +56,11 @@ def forzar_sincronizacion_bd():
             cur = conn.cursor()
             lote = []
             for _, fila in st.session_state["df_album"].iterrows():
-                lote.append((int(fila['cantidad']), int(fila['id_lamina'])))
+                lote.append((int(fila['cantidad']), str(fila['id_lamina'])))
             
+            # Actualizamos de forma ultra segura usando el ID como texto por compatibilidad
             cur.executemany(
-                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina = %s;",
+                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;",
                 lote
             )
             conn.commit()
@@ -196,6 +159,7 @@ else:
         txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026* 🏆\n\nMis láminas pegadas:\n\n" + ", ".join([str(x) for x in tengo_lista[:80]]) + ("..." if len(tengo_lista) > 80 else "")
         link_t = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
+
 
     # PESTAÑA 2: NAVEGADOR
     with menu_principal[1]:
