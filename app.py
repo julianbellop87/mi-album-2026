@@ -1,3 +1,14 @@
+¡Qué pena, Julián! Qué dolor de cabeza con ese caché de Streamlit. Ya vi exactamente qué lo está bloqueando.
+
+El error CacheReplayClosureError ocurre porque metimos un elemento visual de Streamlit (st.toast("...", icon="🔄")) dentro de una función que tiene el decorador @st.cache_resource.
+
+Streamlit intenta guardar en memoria todo lo que hace esa función para no repetirlo, pero se enreda intentando guardar el comportamiento del "Toast" (la notificación flotante). La misma alerta te da la solución más sana y directa: "Remove the @st.cache_resource decorator" (Quitar el decorador de caché).
+
+Como esa función de reparación solo corre una vez al arrancar la app y es súper rápida, no necesita caché para nada. Al quitarle el @st.cache_resource, la base de datos se repara e inicializa sin que Streamlit se confunda con los elementos visuales.
+
+Aquí tenés el código completo y corregido. Copialo todo y reemplazalo en tu app.py:
+
+Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
@@ -13,7 +24,7 @@ def get_connection():
     return psycopg2.connect(DB_URL)
 
 # --- 🛡️ ENDEREZAMIENTO SEGURO DE COLUMNAS Y PÁGINAS (SIN BORRAR CANTIDADES) ---
-@st.cache_resource
+# Se eliminó @st.cache_resource para evitar el error de CacheReplayClosureError con st.toast
 def reparar_estructura_y_actualizar_paginas():
     conn = get_connection()
     cur = conn.cursor()
@@ -72,7 +83,9 @@ def reparar_estructura_y_actualizar_paginas():
     conn.close()
 
 # Ejecutamos la reparación de la BD al arrancar la app
-reparar_estructura_y_actualizar_paginas()
+if "estructura_reparada" not in st.session_state:
+    reparar_estructura_y_actualizar_paginas()
+    st.session_state["estructura_reparada"] = True
 
 # 2. CARGA DE DATOS EN MEMORIA (Orden consecutivo numérico estricto)
 if "df_album" not in st.session_state:
@@ -236,7 +249,7 @@ else:
             if st.session_state["tiene_cambios"]:
                 st.warning("⚠️ Tienes modificaciones locales sin guardar en la nube.")
                 if st.button("💾 FORZAR SINCRONIZACIÓN CON EL SERVIDOR", type="primary", use_container_width=True):
-                    forrar_sincronizacion_bd()
+                    forzar_sincronizacion_bd()
                     st.rerun()
             else:
                 st.info("✅ Todos los datos locales están perfectamente sincronizados.")
@@ -314,7 +327,7 @@ else:
                     
                     if st.session_state["tiene_cambios"]:
                         if st.button("💾 GUARDAR CAMBIOS MASIVOS EN LA NUBE", type="primary", use_container_width=True):
-                            forrar_sincronizacion_bd()
+                            forzar_sincronizacion_bd()
                             st.rerun()
 
             # --- 📱 VISTA CELULAR (BLOQUES EXACTOS DE A 15) ---
