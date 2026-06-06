@@ -12,7 +12,7 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🛡️ SINCRONIZACIÓN CORREGIDA Y FIEL AL EXCEL ---
+# --- 🛡️ SINCRONIZACIÓN FIEL Y EXACTA CON TU EXCEL ---
 def reparar_estructura_y_actualizar_paginas():
     conn = get_connection()
     cur = conn.cursor()
@@ -42,7 +42,7 @@ def reparar_estructura_y_actualizar_paginas():
     except Exception:
         conn.rollback()
 
-    # Sincronizar datos exactos desde el Excel (México Pág 2 Grupo A, Suiza Grupo B, etc.)
+    # Sincronizar usando las mayúsculas exactas del Excel: 'Pagina', 'Equipo', 'Grupo', 'Laminas'
     archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     try:
         df_excel = pd.read_excel(archivo_excel)
@@ -50,19 +50,19 @@ def reparar_estructura_y_actualizar_paginas():
         lote_actualizacion = []
         for _, fila in df_excel.iterrows():
             lote_actualizacion.append((
-                int(fila['Pagina']),          
+                int(fila['Pagina']),          # 'Pagina' con P mayúscula según tu archivo
                 str(fila['Equipo']).strip(),  
                 str(fila['Grupo']).strip(),   
-                int(fila['Laminas'])  # Llave primaria de coincidencia
+                int(fila['Laminas'])          # ID/Número de la lámina
             ))
         
-        # Actualización limpia en base al número de lámina exacto
+        # Actualización en bloque en base al número de lámina exacto
         cur.executemany(
             "UPDATE album_2026 SET pagina = %s, equipo = %s, grupo = %s WHERE id_lamina = %s;", 
             lote_actualizacion
         )
         conn.commit()
-        st.toast("¡Estructura sincronizada al 100% con el Excel real! 📖", icon="🔄")
+        st.toast("¡Base de datos sincronizada fielmente desde el Excel! 📖", icon="🔄")
     except Exception as e:
         conn.rollback()
         st.error(f"Error forzando datos del Excel a Postgres: {e}")
@@ -219,7 +219,7 @@ else:
 
 
     # ------------------------------------------------------
-    # PESTAÑA 2: NAVEGADOR DINÁMICO REVISADO
+    # PESTAÑA 2: NAVEGADOR TOTALMENTE DINÁMICO
     # ------------------------------------------------------
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
@@ -243,7 +243,7 @@ else:
         with st.expander("🔍 Buscador Rápido de Lámina", expanded=False):
             buscar_num = st.text_input("🔢 Digita el Número Exacto de Lámina:", value="", placeholder="Ej: 16")
 
-        # Generamos la lista de páginas basado estrictamente en lo que cargó de la BD/Excel
+        # Generación automática de páginas ordenadas numéricamente
         paginas_existentes = sorted(df_nav['pagina'].unique())
         lista_paginas_combo = [f"Página {p}" for p in paginas_existentes]
         
@@ -256,10 +256,13 @@ else:
             datos_pag = df_nav[df_nav['pagina'] == pagina_seleccionada]
             if not datos_pag.empty:
                 info_equipos = []
-                # Muestra el equipo y grupo real mapeado en la fila
                 for eq in datos_pag['equipo'].unique():
                     gr = datos_pag[datos_pag['equipo'] == eq]['grupo'].values[0]
-                    info_equipos.append(f"{eq} (Grupo {gr})")
+                    # Si aplica muestra el grupo, sino solo la sección (como Estadios)
+                    if str(gr).lower() != 'no aplica':
+                        info_equipos.append(f"{eq} (Grupo {gr})")
+                    else:
+                        info_equipos.append(f"{eq}")
                 st.markdown(f"<p style='margin-top: 32px; font-weight: bold; color: #1E3A8A;'>⚽ Contenido: {' • '.join(info_equipos)}</p>", unsafe_allow_html=True)
 
         filtro_inventario = st.radio("Ver de esta página:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
@@ -364,7 +367,7 @@ else:
 
 
     # ------------------------------------------------------
-    # PESTAÑA 3: PORCENTAJES DE LLENADO 
+    # PESTAÑA 3: PORCENTAJES DE LLENADO
     # ------------------------------------------------------
     with menu_principal[2]:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
