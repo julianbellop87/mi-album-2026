@@ -5,74 +5,77 @@ import pandas as pd
 import os
 
 # 1. CONFIGURACIÓN DE PÁGINA ESENCIAL
-st.set_page_config(page_title="Mi Álbum", layout="centered")
+st.set_page_config(page_title="Mi Álbum 2026", layout="centered")
 
 DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d8gfnpnlk1mc73er3tc0-a.virginia-postgres.render.com/db_album_2026"
 
 def get_connection():
     return psycopg2.connect(DB_URL)
 
+# --- 🔄 FORCE REBUILD: Sincronización Real y Forzada con el Excel ---
 @st.cache_resource
-def init_db_once():
+def init_db_force_update():
     conn = get_connection()
     cur = conn.cursor()
-    tabla_lista = False
+    
+    # 🚨 Eliminamos y recreamos la tabla para limpiar la vieja estructura errónea
+    cur.execute("DROP TABLE IF EXISTS album_2026;") 
+    cur.execute("""
+        CREATE TABLE album_2026 (
+            id_lamina INT PRIMARY KEY,
+            equipo VARCHAR(100),
+            grupo VARCHAR(50),
+            descripcion VARCHAR(150),
+            pagina INT,
+            cantidad INT DEFAULT 0
+        );
+    """)
+    
+    archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     try:
-        cur.execute("SELECT COUNT(*) FROM album_2026;")
-        if cur.fetchone()[0] == 735:
-            tabla_lista = True
-    except:
+        # Cargamos el Excel real de tu repositorio
+        df_excel = pd.read_excel(archivo_excel)
+        laminas_iniciales = []
+        
+        for _, fila in df_excel.iterrows():
+            laminas_iniciales.append((
+                int(fila['Laminas']),
+                str(fila['Equipo']).strip(),
+                str(fila['Grupo']).strip(),
+                str(fila['Descripicion']).strip(), # Mantiene tu typo original del Excel
+                int(fila['Pagina'])
+            ))
+            
+        # Inserción limpia en bloque de las 735 láminas reales
+        cur.executemany(
+            "INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad) VALUES (%s, %s, %s, %s, %s, 0);", 
+            laminas_iniciales
+        )
+        conn.commit()
+    except Exception as e:
         conn.rollback()
-
-    if not tabla_lista:
-        cur.execute("DROP TABLE IF EXISTS album_2026;") 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS album_2026 (
-                id_lamina VARCHAR(50) PRIMARY KEY,
-                equipo VARCHAR(100),
-                grupo VARCHAR(50),
-                descripcion VARCHAR(150),
-                pagina INT,
-                cantidad INT DEFAULT 0
-            );
-        """)
-        archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
-        try:
-            df_excel = pd.read_excel(archivo_excel)
-            laminas_iniciales = []
-            for _, fila in df_excel.iterrows():
-                laminas_iniciales.append((
-                    str(int(fila['Laminas'])).strip(),
-                    str(fila['Equipo']).strip(),
-                    str(fila['Grupo']).strip(),
-                    str(fila['Descripicion']).strip(),
-                    int(fila['Pagina'])
-                ))
-            cur.executemany(
-                "INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina) VALUES (%s, %s, %s, %s, %s);", 
-                laminas_iniciales
-            )
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
+        st.error(f"Error crítico cargando el archivo Excel: {e}")
+        
     cur.close()
     conn.close()
 
-init_db_once()
+# Ejecuta el saneamiento y carga limpia de la BD
+init_db_force_update()
 
-# 2. MEMORIA CACHÉ LOCAL ULTRA-RÁPIDA
+# 2. CAPA DE MEMORIA LOCAL (Session State)
 if "df_album" not in st.session_state:
     conn = get_connection()
-    df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026;", conn)
+    df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina ASC;", conn)
     conn.close()
     df_base['id_lamina'] = df_base['id_lamina'].astype(int)
     df_base['cantidad'] = df_base['cantidad'].astype(int)
-    st.session_state["df_album"] = df_base.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
+    df_base['pagina'] = df_base['pagina'].astype(int)
+    st.session_state["df_album"] = df_base
 
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
-# --- CALLBACKS ULTRA-LIGEROS (Solo alteran la celda específica del array) ---
+# --- CALLBACKS DE CONTEO ---
 def registrar_cambio_local(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
@@ -84,7 +87,7 @@ def registrar_cambio_local(id_lamina, operacion):
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
 
-# --- SINCRONIZACIÓN BAJO DEMANDA (BATCH CORRECTION) ---
+# --- SINCRONIZACIÓN HACIA POSTGRES ---
 def forzar_sincronizacion_bd():
     with st.spinner("Sincronizando lote completo con Postgres..."):
         try:
@@ -92,10 +95,10 @@ def forzar_sincronizacion_bd():
             cur = conn.cursor()
             lote = []
             for _, fila in st.session_state["df_album"].iterrows():
-                lote.append((int(fila['cantidad']), str(fila['id_lamina'])))
+                lote.append((int(fila['cantidad']), int(fila['id_lamina'])))
             
             cur.executemany(
-                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;",
+                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina = %s;",
                 lote
             )
             conn.commit()
@@ -106,8 +109,9 @@ def forzar_sincronizacion_bd():
         except Exception as e:
             st.error(f"Error al sincronizar: {e}")
 
+
 # ==========================================================
-# 🔐 SEGURIDAD
+# 🔐 GESTIÓN DE ACCESO ÉPICO
 # ==========================================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -137,7 +141,7 @@ if not st.session_state["autenticado"]:
             st.rerun()
 
 else:
-    st.markdown("<h2 style='text-align: center; margin-top: -10px; margin-bottom: 5px;'>🏆 Mi Álbum</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; margin-top: -10px; margin-bottom: 5px;'>🏆 Mi Álbum 2026</h2>", unsafe_allow_html=True)
     
     col_vacio, col_logout = st.columns([4, 1.2])
     with col_logout:
@@ -149,10 +153,11 @@ else:
             st.session_state["tiene_cambios"] = False
             st.rerun()
 
-    # PESTAÑAS
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
-    # PESTAÑA 1: DASHBOARD (Cálculo perezoso: Solo se ejecuta si abres esta pestaña)
+    # ------------------------------------------------------
+    # PESTAÑA 1: DASHBOARD GENERAL
+    # ------------------------------------------------------
     with menu_principal[0]:
         df_gen = st.session_state["df_album"].copy()
         df_gen['tiene'] = df_gen['cantidad'].apply(lambda x: 1 if x > 0 else 0)
@@ -196,7 +201,9 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS (Aislado y optimizado para clics ultra veloces)
+    # ------------------------------------------------------
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS CORREGIDO
+    # ------------------------------------------------------
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -214,7 +221,6 @@ else:
             else:
                 st.info("✅ Datos locales sincronizados con el servidor remoto.")
         
-        # Clon local exclusivo y liviano para filtros rápidos
         df_nav = st.session_state["df_album"]
         
         with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=False):
@@ -233,19 +239,12 @@ else:
                 paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())]
                 buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
 
-            col_b5, col_b6 = st.columns(2)
-            with col_b5:
-                filtrar_escudos = st.checkbox("🛡️ Ver solo Escudos")
-            with col_b6:
-                filtrar_equipos_ab = st.checkbox("👥 Ver solo Equipos A y B")
-
         lista_paginas_nav = df_nav.groupby(['pagina', 'equipo', 'grupo']).size().reset_index().sort_values(by='pagina')
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"] + [f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})" for _, r in lista_paginas_nav.iterrows()]
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
 
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        # Filtrado veloz
         df_pagina_view = df_nav.copy()
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
             pagina_seleccionada = int(seleccion_combo.split(" ")[1])
@@ -258,10 +257,6 @@ else:
             df_pagina_view = df_pagina_view[df_pagina_view['grupo'] == buscar_grupo]
         if buscar_por_pagina != "Todas las Páginas":
             df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
-        if filtrar_escudos:
-            df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.lower().str.contains('escudo', na=False)]
-        if filtrar_equipos_ab:
-            df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.lower().str.contains('equipo a|equipo b', na=False)]
 
         if filtro_inventario == "Solo Faltantes 🚨":
             df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
@@ -286,7 +281,7 @@ else:
                     c_info, c_estado = st.columns([2.5, 1.5])
                 
                 with c_info:
-                    st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
+                    st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Grupo {lam['grupo']} • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
                     
                 with c_estado:
                     if cant_actual == 0:
@@ -305,7 +300,9 @@ else:
                 st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
 
 
-    # PESTAÑA 3: PORCENTAJES DE LLENADO (Lazy loading absoluto)
+    # ------------------------------------------------------
+    # PESTAÑA 3: PORCENTAJES DE LLENADO
+    # ------------------------------------------------------
     with menu_principal[2]:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
         sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
@@ -339,5 +336,5 @@ else:
             df_grupo = df_stats.groupby('grupo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
             df_grupo['Porcentaje'] = (df_grupo['Adquiridas'] / df_grupo['Total']) * 100
             for _, fila in df_grupo.iterrows():
-                st.write(f"**{fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']} ({fila['Porcentaje']:.1f}%)")
+                st.write(f"**Grupo {fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']} ({fila['Porcentaje']:.1f}%)")
                 st.progress(fila['Porcentaje'] / 100)
