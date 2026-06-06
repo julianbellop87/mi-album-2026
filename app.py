@@ -12,20 +12,19 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🛡️ ENDEREZAMIENTO SEGURO DE COLUMNAS Y PÁGINAS (SIN BORRAR CANTIDADES) ---
-# Se eliminó @st.cache_resource para evitar el error de CacheReplayClosureError con st.toast
+# --- 🛡️ SINCRONIZACIÓN CORREGIDA Y FIEL AL EXCEL ---
 def reparar_estructura_y_actualizar_paginas():
     conn = get_connection()
     cur = conn.cursor()
     
-    # PASO 1: Intentar corregir el tipo de la columna id_lamina a INT de forma definitiva
+    # Asegurar tipo de columna id_lamina a INT
     try:
         cur.execute("ALTER TABLE album_2026 ALTER COLUMN id_lamina TYPE INT USING id_lamina::integer;")
         conn.commit()
-    except Exception as e:
+    except Exception:
         conn.rollback()
     
-    # Reparar el nombre de la columna grupo si viene de versiones viejas con el typo "groupo"
+    # Reparar columna grupo si existe el typo antiguo "groupo"
     try:
         cur.execute("""
             DO $$ 
@@ -40,10 +39,10 @@ def reparar_estructura_y_actualizar_paginas():
             END $$;
         """)
         conn.commit()
-    except Exception as e:
+    except Exception:
         conn.rollback()
 
-    # PASO 2: Actualizar las páginas, equipos y grupos cruzando con tu Excel actual
+    # Sincronizar datos exactos desde el Excel (México Pág 2 Grupo A, Suiza Grupo B, etc.)
     archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     try:
         df_excel = pd.read_excel(archivo_excel)
@@ -51,36 +50,34 @@ def reparar_estructura_y_actualizar_paginas():
         lote_actualizacion = []
         for _, fila in df_excel.iterrows():
             lote_actualizacion.append((
-                int(fila['Pagina']),          # Nueva página correcta del Excel
-                str(fila['Equipo']).strip(),  # Nombre limpio del equipo
-                str(fila['Grupo']).strip(),   # Grupo correcto
-                str(fila['Laminas']).strip()  # Enviamos como texto para máxima compatibilidad con el cast
+                int(fila['Pagina']),          
+                str(fila['Equipo']).strip(),  
+                str(fila['Grupo']).strip(),   
+                int(fila['Laminas'])  # Llave primaria de coincidencia
             ))
         
-        # Usamos CAST explícito (::varchar) para que funcione SÍ O SÍ, sin importar el tipo actual en la BD
+        # Actualización limpia en base al número de lámina exacto
         cur.executemany(
-            "UPDATE album_2026 SET pagina = %s, equipo = %s, grupo = %s WHERE id_lamina::varchar = %s::varchar;", 
+            "UPDATE album_2026 SET pagina = %s, equipo = %s, grupo = %s WHERE id_lamina = %s;", 
             lote_actualizacion
         )
         conn.commit()
-        st.toast("¡Estructura y páginas corregidas con éxito sin tocar tu inventario! 📐", icon="🔄")
+        st.toast("¡Estructura sincronizada al 100% con el Excel real! 📖", icon="🔄")
     except Exception as e:
         conn.rollback()
-        st.error(f"Error en re-mapeo de datos: {e}")
+        st.error(f"Error forzando datos del Excel a Postgres: {e}")
         
     cur.close()
     conn.close()
 
-# Ejecutamos la reparación de la BD al arrancar la app
+# 2. FLUJO DE ARRANQUE SEGURO
 if "estructura_reparada" not in st.session_state:
     reparar_estructura_y_actualizar_paginas()
     st.session_state["estructura_reparada"] = True
 
-# 2. CARGA DE DATOS EN MEMORIA (Orden consecutivo numérico estricto)
 if "df_album" not in st.session_state:
     conn = get_connection()
-    # Forzamos el ordenamiento numérico con ::integer por si la columna aún es texto
-    df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina::integer ASC;", conn)
+    df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina ASC;", conn)
     conn.close()
     df_base['id_lamina'] = df_base['id_lamina'].astype(int)
     df_base['cantidad'] = df_base['cantidad'].astype(int)
@@ -92,9 +89,8 @@ if "df_album" not in st.session_state:
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
-# --- GESTOR DE PAGINACIÓN INTERNA POR PÁGINA FÍSICA A 15 LÁMINAS ---
 if "limites_paginas" not in st.session_state:
-    st.session_state["limites_paginas"] = {i: 15 for i in range(1, 50)}
+    st.session_state["limites_paginas"] = {i: 15 for i in range(1, 100)}
 
 # --- CALLBACKS PARA MENÚ INDIVIDUAL ---
 def registrar_cambio_local(id_lamina, operacion):
@@ -116,11 +112,10 @@ def forzar_sincronizacion_bd():
             cur = conn.cursor()
             lote = []
             for _, fila in st.session_state["df_album"].iterrows():
-                lote.append((int(fila['cantidad']), str(fila['id_lamina']).strip()))
+                lote.append((int(fila['cantidad']), int(fila['id_lamina'])))
             
-            # Usamos cast explícito para blindar también el guardado de cantidades
             cur.executemany(
-                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;",
+                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina = %s;",
                 lote
             )
             conn.commit()
@@ -224,7 +219,7 @@ else:
 
 
     # ------------------------------------------------------
-    # PESTAÑA 2: NAVEGADOR
+    # PESTAÑA 2: NAVEGADOR DINÁMICO REVISADO
     # ------------------------------------------------------
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
@@ -248,17 +243,24 @@ else:
         with st.expander("🔍 Buscador Rápido de Lámina", expanded=False):
             buscar_num = st.text_input("🔢 Digita el Número Exacto de Lámina:", value="", placeholder="Ej: 16")
 
-        # --- SELECTOR POR COMBO (SELECTBOX) DEL 1 AL 49 ---
-        lista_paginas_combo = [f"Página {i}" for i in range(1, 50)]
+        # Generamos la lista de páginas basado estrictamente en lo que cargó de la BD/Excel
+        paginas_existentes = sorted(df_nav['pagina'].unique())
+        lista_paginas_combo = [f"Página {p}" for p in paginas_existentes]
         
         col_pag1, col_pag2 = st.columns([2, 3])
         with col_pag1:
-            seleccion_pagina_txt = st.selectbox("📖 Selecciona la Página:", lista_paginas_combo, index=6) # Abre por defecto en Pág 7 (Qatar)
+            seleccion_pagina_txt = st.selectbox("📖 Selecciona la Página:", lista_paginas_combo) 
             pagina_seleccionada = int(seleccion_pagina_txt.split(" ")[1])
         
         with col_pag2:
-            equipos_en_pagina = df_nav[df_nav['pagina'] == pagina_seleccionada]['equipo'].unique()
-            st.markdown(f"<p style='margin-top: 32px; font-weight: bold; color: #1E3A8A;'>⚽ Contenido: {' • '.join(equipos_en_pagina)}</p>", unsafe_allow_html=True)
+            datos_pag = df_nav[df_nav['pagina'] == pagina_seleccionada]
+            if not datos_pag.empty:
+                info_equipos = []
+                # Muestra el equipo y grupo real mapeado en la fila
+                for eq in datos_pag['equipo'].unique():
+                    gr = datos_pag[datos_pag['equipo'] == eq]['grupo'].values[0]
+                    info_equipos.append(f"{eq} (Grupo {gr})")
+                st.markdown(f"<p style='margin-top: 32px; font-weight: bold; color: #1E3A8A;'>⚽ Contenido: {' • '.join(info_equipos)}</p>", unsafe_allow_html=True)
 
         filtro_inventario = st.radio("Ver de esta página:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
@@ -276,7 +278,6 @@ else:
 
         df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
 
-        # --- 🖥️ MODO MASIVO EN TABLA ---
         modo_masivo = st.checkbox("🖥️ Activar Edición Masiva en Tabla (Recomendado para PC)", value=False)
 
         if df_pagina_view.empty:
@@ -319,10 +320,12 @@ else:
                             forzar_sincronizacion_bd()
                             st.rerun()
 
-            # --- 📱 VISTA CELULAR (BLOQUES EXACTOS DE A 15) ---
             else:
                 st.write("---")
                 
+                if pagina_seleccionada not in st.session_state["limites_paginas"]:
+                    st.session_state["limites_paginas"][pagina_seleccionada] = 15
+                    
                 limite_esta_pagina = st.session_state["limites_paginas"][pagina_seleccionada]
                 df_bloque = df_pagina_view.head(limite_esta_pagina)
                 
@@ -396,5 +399,5 @@ else:
             df_grupo = df_stats.groupby('grupo').agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
             df_grupo['Porcentaje'] = (df_grupo['Adquiridas'] / df_grupo['Total']) * 100
             for _, fila in df_grupo.iterrows():
-                st.write(f"**{fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']} ({fila['Porcentaje']:.1f}%)")
+                st.write(f"**Grupo {fila['grupo']}:** {fila['Adquiridas']}/{fila['Total']} ({fila['Porcentaje']:.1f}%)")
                 st.progress(fila['Porcentaje'] / 100)
