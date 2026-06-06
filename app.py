@@ -12,19 +12,19 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🛡️ SINCRONIZACIÓN FIEL Y EXACTA CON TU EXCEL ---
+# --- 🛡️ SINCRONIZACIÓN INYECTADA DIRECTAMENTE (SIN ARCHIVOS EXTERNOS) ---
 def reparar_estructura_y_actualizar_paginas():
     conn = get_connection()
     cur = conn.cursor()
     
-    # Asegurar tipo de columna id_lamina a INT
+    # PASO 1: Asegurar tipo de columna id_lamina a INT
     try:
         cur.execute("ALTER TABLE album_2026 ALTER COLUMN id_lamina TYPE INT USING id_lamina::integer;")
         conn.commit()
     except Exception:
         conn.rollback()
     
-    # Reparar columna grupo si existe el typo antiguo "groupo"
+    # PASO 2: Reparar columna grupo si existe el typo antiguo "groupo"
     try:
         cur.execute("""
             DO $$ 
@@ -42,30 +42,24 @@ def reparar_estructura_y_actualizar_paginas():
     except Exception:
         conn.rollback()
 
-    # Sincronizar usando las mayúsculas exactas del Excel: 'Pagina', 'Equipo', 'Grupo', 'Laminas'
-    archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
+    # PASO 3: Corrección matemática de páginas y grupos directo en SQL
+    # Cada página tiene exactamente 15 láminas. Estadios Pág 1, México Pág 2 (Grupo A)
     try:
-        df_excel = pd.read_excel(archivo_excel)
+        # Asigna la página dividiendo el ID de la lámina entre 15 y redondeando hacia arriba
+        cur.execute("UPDATE album_2026 SET pagina = CEIL(id_lamina / 15.0);")
         
-        lote_actualizacion = []
-        for _, fila in df_excel.iterrows():
-            lote_actualizacion.append((
-                int(fila['Pagina']),          # 'Pagina' con P mayúscula según tu archivo
-                str(fila['Equipo']).strip(),  
-                str(fila['Grupo']).strip(),   
-                int(fila['Laminas'])          # ID/Número de la lámina
-            ))
+        # Ajustamos los nombres de equipos y grupos base según tu estructura real
+        cur.execute("UPDATE album_2026 SET grupo = 'No aplica', equipo = 'Estadios' WHERE id_lamina BETWEEN 1 AND 15;")
+        cur.execute("UPDATE album_2026 SET grupo = 'A', equipo = 'México' WHERE id_lamina BETWEEN 16 AND 30;")
         
-        # Actualización en bloque en base al número de lámina exacto
-        cur.executemany(
-            "UPDATE album_2026 SET pagina = %s, equipo = %s, grupo = %s WHERE id_lamina = %s;", 
-            lote_actualizacion
-        )
+        # Corrección específica para Suiza en el Grupo B
+        cur.execute("UPDATE album_2026 SET grupo = 'B' WHERE LOWER(equipo) = 'suiza';")
+        
         conn.commit()
-        st.toast("¡Base de datos sincronizada fielmente desde el Excel! 📖", icon="🔄")
+        st.toast("¡Base de datos sincronizada y corregida con éxito! 🏆", icon="🔄")
     except Exception as e:
         conn.rollback()
-        st.error(f"Error forzando datos del Excel a Postgres: {e}")
+        st.error(f"Error reestructurando la base de datos: {e}")
         
     cur.close()
     conn.close()
@@ -243,7 +237,6 @@ else:
         with st.expander("🔍 Buscador Rápido de Lámina", expanded=False):
             buscar_num = st.text_input("🔢 Digita el Número Exacto de Lámina:", value="", placeholder="Ej: 16")
 
-        # Generación automática de páginas ordenadas numéricamente
         paginas_existentes = sorted(df_nav['pagina'].unique())
         lista_paginas_combo = [f"Página {p}" for p in paginas_existentes]
         
@@ -258,7 +251,6 @@ else:
                 info_equipos = []
                 for eq in datos_pag['equipo'].unique():
                     gr = datos_pag[datos_pag['equipo'] == eq]['grupo'].values[0]
-                    # Si aplica muestra el grupo, sino solo la sección (como Estadios)
                     if str(gr).lower() != 'no aplica':
                         info_equipos.append(f"{eq} (Grupo {gr})")
                     else:
