@@ -18,9 +18,15 @@ def reparar_estructura_y_actualizar_paginas():
     conn = get_connection()
     cur = conn.cursor()
     
-    # PASO 1: Reparar el nombre de la columna en Postgres si es que viene con el typo viejo
+    # PASO 1: Intentar corregir el tipo de la columna id_lamina a INT de forma definitiva
     try:
-        # Si existe la columna vieja "groupo", la renombramos a "grupo" para que sea válida
+        cur.execute("ALTER TABLE album_2026 ALTER COLUMN id_lamina TYPE INT USING id_lamina::integer;")
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+    
+    # Reparar el nombre de la columna grupo si viene de versiones viejas con el typo "groupo"
+    try:
         cur.execute("""
             DO $$ 
             BEGIN 
@@ -48,12 +54,12 @@ def reparar_estructura_y_actualizar_paginas():
                 int(fila['Pagina']),          # Nueva página correcta del Excel
                 str(fila['Equipo']).strip(),  # Nombre limpio del equipo
                 str(fila['Grupo']).strip(),   # Grupo correcto
-                int(fila['Laminas'])          # ID de la lámina para el filtro WHERE
+                str(fila['Laminas']).strip()  # Enviamos como texto para máxima compatibilidad con el cast
             ))
         
-        # Hacemos el UPDATE masivo. Tus cantidades ('cantidad') NO se tocan, se quedan intactas.
+        # Usamos CAST explícito (::varchar) para que funcione SÍ O SÍ, sin importar el tipo actual en la BD
         cur.executemany(
-            "UPDATE album_2026 SET pagina = %s, equipo = %s, grupo = %s WHERE id_lamina = %s;", 
+            "UPDATE album_2026 SET pagina = %s, equipo = %s, grupo = %s WHERE id_lamina::varchar = %s::varchar;", 
             lote_actualizacion
         )
         conn.commit()
@@ -68,10 +74,11 @@ def reparar_estructura_y_actualizar_paginas():
 # Ejecutamos la reparación de la BD al arrancar la app
 reparar_estructura_y_actualizar_paginas()
 
-# 2. CARGA DE DATOS EN MEMORIA (Orden consecutivo matemático estricto)
+# 2. CARGA DE DATOS EN MEMORIA (Orden consecutivo numérico estricto)
 if "df_album" not in st.session_state:
     conn = get_connection()
-    df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina ASC;", conn)
+    # Forzamos el ordenamiento numérico con ::integer por si la columna aún es texto
+    df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina::integer ASC;", conn)
     conn.close()
     df_base['id_lamina'] = df_base['id_lamina'].astype(int)
     df_base['cantidad'] = df_base['cantidad'].astype(int)
@@ -107,10 +114,11 @@ def forzar_sincronizacion_bd():
             cur = conn.cursor()
             lote = []
             for _, fila in st.session_state["df_album"].iterrows():
-                lote.append((int(fila['cantidad']), int(fila['id_lamina'])))
+                lote.append((int(fila['cantidad']), str(fila['id_lamina']).strip()))
             
+            # Usamos cast explícito para blindar también el guardado de cantidades
             cur.executemany(
-                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina = %s;",
+                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;",
                 lote
             )
             conn.commit()
