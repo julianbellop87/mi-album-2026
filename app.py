@@ -12,13 +12,12 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🔄 FORCE REBUILD: Sincronización Real y Forzada con el Excel ---
-@st.cache_resource
-def init_db_force_update():
+# --- 🔄 RECONSTRUCCIÓN FORZADA (Sin decoradores que congelen el estado) ---
+def actualizar_base_de_datos_real():
     conn = get_connection()
     cur = conn.cursor()
     
-    # 🚨 Eliminamos y recreamos la tabla para limpiar la vieja estructura errónea
+    # 🚨 Eliminamos la tabla antigua por completo para romper el bucle del miércoles
     cur.execute("DROP TABLE IF EXISTS album_2026;") 
     cur.execute("""
         CREATE TABLE album_2026 (
@@ -33,7 +32,6 @@ def init_db_force_update():
     
     archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     try:
-        # Cargamos el Excel real de tu repositorio
         df_excel = pd.read_excel(archivo_excel)
         laminas_iniciales = []
         
@@ -42,11 +40,11 @@ def init_db_force_update():
                 int(fila['Laminas']),
                 str(fila['Equipo']).strip(),
                 str(fila['Grupo']).strip(),
-                str(fila['Descripicion']).strip(), # Mantiene tu typo original del Excel
+                str(fila['Descripicion']).strip(), # Mantiene el nombre de columna del Excel
                 int(fila['Pagina'])
             ))
             
-        # Inserción limpia en bloque de las 735 láminas reales
+        # Inserción limpia desde cero de las 735 filas actualizadas
         cur.executemany(
             "INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad) VALUES (%s, %s, %s, %s, %s, 0);", 
             laminas_iniciales
@@ -54,15 +52,17 @@ def init_db_force_update():
         conn.commit()
     except Exception as e:
         conn.rollback()
-        st.error(f"Error crítico cargando el archivo Excel: {e}")
+        st.error(f"Error procesando el archivo Excel: {e}")
         
     cur.close()
     conn.close()
 
-# Ejecuta el saneamiento y carga limpia de la BD
-init_db_force_update()
+# Forzamos a que corra la actualización limpia sin importar lo que hubiera en caché
+if "bd_inicializada_firme" not in st.session_state:
+    actualizar_base_de_datos_real()
+    st.session_state["bd_inicializada_firme"] = True
 
-# 2. CAPA DE MEMORIA LOCAL (Session State)
+# 2. CAPA DE SESIÓN LOCAL
 if "df_album" not in st.session_state:
     conn = get_connection()
     df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, pagina, cantidad FROM album_2026 ORDER BY id_lamina ASC;", conn)
@@ -75,7 +75,7 @@ if "df_album" not in st.session_state:
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
-# --- CALLBACKS DE CONTEO ---
+# --- CALLBACKS DE INVENTARIO ---
 def registrar_cambio_local(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
@@ -87,9 +87,8 @@ def registrar_cambio_local(id_lamina, operacion):
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
 
-# --- SINCRONIZACIÓN HACIA POSTGRES ---
 def forzar_sincronizacion_bd():
-    with st.spinner("Sincronizando lote completo con Postgres..."):
+    with st.spinner("Sincronizando con Postgres..."):
         try:
             conn = get_connection()
             cur = conn.cursor()
@@ -105,13 +104,13 @@ def forzar_sincronizacion_bd():
             cur.close()
             conn.close()
             st.session_state["tiene_cambios"] = False
-            st.toast("¡Álbum guardado en la nube con éxito! 🏆", icon="💾")
+            st.toast("¡Cambios guardados con éxito! 🏆", icon="💾")
         except Exception as e:
             st.error(f"Error al sincronizar: {e}")
 
 
 # ==========================================================
-# 🔐 GESTIÓN DE ACCESO ÉPICO
+# 🔐 GESTIÓN DE SEGURIDAD
 # ==========================================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -155,9 +154,7 @@ else:
 
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
-    # ------------------------------------------------------
-    # PESTAÑA 1: DASHBOARD GENERAL
-    # ------------------------------------------------------
+    # PESTAÑA 1: DASHBOARD
     with menu_principal[0]:
         df_gen = st.session_state["df_album"].copy()
         df_gen['tiene'] = df_gen['cantidad'].apply(lambda x: 1 if x > 0 else 0)
@@ -200,10 +197,7 @@ else:
         link_t = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
-
-    # ------------------------------------------------------
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS CORREGIDO
-    # ------------------------------------------------------
+    # PESTAÑA 2: NAVEGADOR
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -299,10 +293,7 @@ else:
                             
                 st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
 
-
-    # ------------------------------------------------------
-    # PESTAÑA 3: PORCENTAJES DE LLENADO
-    # ------------------------------------------------------
+    # PESTAÑA 3: PORCENTAJES
     with menu_principal[2]:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
         sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
