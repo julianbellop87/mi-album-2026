@@ -1,3 +1,12 @@
+¡Ah, perfecto, Julián! Ya te entiendo exactamente para dónde vas. Querés una tabla súper minimalista, compacta y limpia, ideal para meter datos en ráfaga.
+
+El problema con que se siguiera corriendo es que, al tener tantas columnas (Grupo, Descripción, etc.), Streamlit se ve forzado a meter el scroll horizontal. Si dejamos únicamente 3 columnas esenciales (No., Equipo y Cantidad), la tabla se reduce tanto que cabe completa en la pantalla sin necesidad de scroll, y al estar bloqueadas las dos primeras con pinned=True, la experiencia de usuario queda perfecta.
+
+Además, apliqué la regla lógica para que cuando el equipo sea "Estadios", la celda de la descripción no muestre texto largo, sino que quede completamente vacía, dejando limpios esos 15 registros.
+
+Aquí tenés el script completo con la tabla ultra reducida y optimizada:
+
+Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
@@ -265,7 +274,7 @@ else:
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        # Aplicación estricta de filtros sobre el DataFrame temporal
+        # Aplicación de filtros
         df_pagina_view = df_nav.copy()
         
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
@@ -309,8 +318,11 @@ else:
                     else:
                         c_info, c_estado = st.columns([2.5, 1.5])
                     
+                    # Lógica para dejar la descripción vacía si es Estadio
+                    desc_render = "" if str(lam['equipo']).lower() == "estadios" else lam['descripcion']
+                    
                     with c_info:
-                        st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Grupo {lam['grupo']} • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
+                        st.markdown(f"**No. {id_l}** - {desc_render}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Grupo {lam['grupo']} • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
                         
                     with c_estado:
                         if cant_actual == 0:
@@ -329,35 +341,40 @@ else:
                     st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
             
             # ==========================================
-            # OPCIÓN 2: VISTA TABLA COMPACTA (PC MASIVA)
+            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (PC)
             # ==========================================
             else:
                 st.write("---")
-                st.markdown("<p style='font-size: 13px; color: #555;'>💡 <b>Tip de velocidad:</b> Modifica las celdas de la columna <b>'Cantidad'</b>. El Número y Equipo se quedarán fijos a la izquierda al desplazarte.</p>", unsafe_allow_html=True)
+                st.markdown("<p style='font-size: 13px; color: #555;'>💡 <b>Tip de velocidad:</b> Modifica directamente los valores en la columna <b>'Cantidad'</b>.</p>", unsafe_allow_html=True)
                 
-                # Configuración optimizada de tamaños y congelación de columnas
-                config_columnas = {
-                    "id_lamina": st.column_config.NumberColumn("Nº Lámina", disabled=True, format="%d", pinned=True, width=70),
-                    "equipo": st.column_config.TextColumn("⚽ Equipo", disabled=True, pinned=True, width=140),
-                    "grupo": st.column_config.TextColumn("🗂️ Grupo", disabled=True, width=90),
-                    "descripcion": st.column_config.TextColumn("📋 Descripción", disabled=True, width=180),
-                    "pagina": st.column_config.NumberColumn("📄 Pág", disabled=True, format="%d", width=60),
-                    "cantidad": st.column_config.NumberColumn("🔢 Cantidad", min_value=0, max_value=99, step=1, required=True, width=90),
+                # 1. Filtramos y limpiamos el DataFrame temporal para mostrar SOLO las 3 columnas solicitadas
+                df_ultra_reducido = df_pagina_view[['id_lamina', 'equipo', 'cantidad']].copy()
+                
+                # Cambiamos el nombre técnico a "No." como pediste
+                df_ultra_reducido = df_ultra_reducido.rename(columns={'id_lamina': 'No.'})
+                
+                # 2. Aplicamos la regla para vaciar la descripción si aplica en el dataframe (en este caso solo mostramos equipo, si hubiera descripción para estadios iría vacía)
+                # Como quitamos descripción y grupo por completo, la tabla queda diminuta.
+                
+                config_columnas_pc = {
+                    "No.": st.column_config.NumberColumn("No.", disabled=True, format="%d", pinned=True, width=65),
+                    "equipo": st.column_config.TextColumn("⚽ Equipo", disabled=True, pinned=True, width=150),
+                    "cantidad": st.column_config.NumberColumn("🔢 Cantidad", min_value=0, max_value=99, step=1, required=True, width=95),
                 }
 
                 if st.session_state["modo_rol"] == "admin":
                     tabla_editada = st.data_editor(
-                        df_pagina_view,
-                        column_config=config_columnas,
+                        df_ultra_reducido,
+                        column_config=config_columnas_pc,
                         hide_index=True,
                         use_container_width=True,
                         key="editor_masivo_pc"
                     )
                     
-                    # Sincronización local reactiva de celdas modificadas
-                    if not tabla_editada.equals(df_pagina_view):
+                    # Sincronización con el Session State usando la columna "No."
+                    if not tabla_editada.equals(df_ultra_reducido):
                         for idx, fila in tabla_editada.iterrows():
-                            id_l = int(fila['id_lamina'])
+                            id_l = int(fila['No.'])
                             nueva_cant = int(fila['cantidad'])
                             
                             idx_original = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_l].index
@@ -368,10 +385,9 @@ else:
                                     st.session_state["tiene_cambios"] = True
                         st.rerun()
                 else:
-                    # Modo Consulta hereda la misma visualización compacta y congelada pero bloqueada
                     st.dataframe(
-                        df_pagina_view,
-                        column_config=config_columnas,
+                        df_ultra_reducido,
+                        column_config=config_columnas_pc,
                         hide_index=True,
                         use_container_width=True
                     )
