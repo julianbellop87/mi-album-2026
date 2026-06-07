@@ -1,3 +1,15 @@
+¡Hágale, Julián! Entendido perfectamente. Vamos a dejar las dos opciones conviviendo en paz en la pestaña del Navegador de Láminas:
+
+La opción 1 (Actual): El inventario consecutivo, lámina por lámina con los botones de ➕ y ➖, ideal para cuando estás con el celular en la mano pegando láminas físicamente.
+
+La opción 2 (Nueva Alternativa - Vista Tabla / PC Masiva): Un buscador y una tabla interactiva (st.data_editor) optimizada para PC. Con esta opción vas a poder tirar filtros rápidos, ver muchas filas al tiempo en modo rejilla y digitar o pegar las cantidades en lote de forma masiva y súper veloz antes de hundir el botón de guardar.
+
+Para activar esto de forma limpia y con una marcación clara dentro de la pestaña, implementé un st.radio tipo selector arriba del navegador para que elijas con qué "Modo de Vista" querés trabajar.
+
+Aquí tenés el código seguro (manteniendo el flujo de protección de datos sin el DROP TABLE) con la nueva funcionalidad masiva habilitada:
+
+Código Completo Habilitando "Opción PC Masiva"
+Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
@@ -12,26 +24,20 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🚀 RECONSTRUCCIÓN TOTAL: EL EXCEL MANDA Y BORRA EL PASADO ---
+# --- 🔒 FLUJO SEGURO: EL EXCEL DA LA PAGINACIÓN, POSTGRES GUARDA TUS CANTIDADES ---
 if "df_album" not in st.session_state:
     archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     
     try:
-        # 1. Leer el archivo Excel tal cual lo tenés configurado
         df_excel = pd.read_excel(archivo_excel)
         df_excel['Laminas'] = df_excel['Laminas'].astype(int)
         df_excel['Pagina'] = df_excel['Pagina'].astype(int)
         
-        # 2. Forzar limpieza en Postgres: Borramos la estructura vieja y conflictiva
         conn = get_connection()
         cur = conn.cursor()
         
-        # ¡BORRÓN Y CUENTA NUEVA EXPLICITO!
-        cur.execute("DROP TABLE IF EXISTS album_2026 CASCADE;")
-        
-        # Creamos la tabla limpia con la estructura real
         cur.execute("""
-            CREATE TABLE album_2026 (
+            CREATE TABLE IF NOT EXISTS album_2026 (
                 id_lamina INT PRIMARY KEY,
                 equipo VARCHAR(100),
                 grupo VARCHAR(50),
@@ -40,47 +46,48 @@ if "df_album" not in st.session_state:
                 cantidad INT DEFAULT 0
             );
         """)
-        
-        # Insertar los datos limpios respetando el orden e índices consecutivos del Excel
-        for _, fila in df_excel.iterrows():
-            cur.execute("""
-                INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
-                VALUES (%s, %s, %s, %s, %s, 0);
-            """, (
-                int(fila['Laminas']), 
-                str(fila['Equipo']).strip(), 
-                str(fila['Grupo']).strip(), 
-                str(fila['Descripicion']).strip(), 
-                int(fila['Pagina'])
-            ))
-        
         conn.commit()
+        
+        cur.execute("SELECT COUNT(*) FROM album_2026;")
+        registros_en_bd = cur.fetchone()[0]
+        
+        if registros_en_bd == 0:
+            for _, fila in df_excel.iterrows():
+                cur.execute("""
+                    INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
+                    VALUES (%s, %s, %s, %s, %s, 0);
+                """, (
+                    int(fila['Laminas']), 
+                    str(fila['Equipo']).strip(), 
+                    str(fila['Grupo']).strip(), 
+                    str(fila['Descripicion']).strip(), 
+                    int(fila['Pagina'])
+                ))
+            conn.commit()
+            
+        df_bd = pd.read_sql_query("SELECT id_lamina, cantidad FROM album_2026;", conn)
         cur.close()
         conn.close()
         
-        # Inicializar el estado de la aplicación en ceros pero con la paginación impecable
-        df_final = pd.DataFrame()
-        df_final['id_lamina'] = df_excel['Laminas']
-        df_final['equipo'] = df_excel['Equipo'].astype(str).str.strip()
-        df_final['grupo'] = df_excel['Grupo'].astype(str).str.strip()
-        df_final['descripcion'] = df_excel['Descripicion'].astype(str).str.strip()
-        df_final['pagina'] = df_excel['Pagina'].astype(int)
-        df_final['cantidad'] = 0
-        
-        st.session_state["df_album"] = df_final.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
+        df_bd['id_lamina'] = df_bd['id_lamina'].astype(int)
+        df_bd['cantidad'] = df_bd['cantidad'].astype(int)
         
     except Exception as e:
-        st.error(f"Error crítico en la inicialización: {e}")
-        # Fallback de emergencia
-        if 'df_excel' in locals():
-            df_final = pd.DataFrame()
-            df_final['id_lamina'] = df_excel['Laminas']
-            df_final['equipo'] = df_excel['Equipo'].astype(str).str.strip()
-            df_final['grupo'] = df_excel['Grupo'].astype(str).str.strip()
-            df_final['descripcion'] = df_excel['Descripicion'].astype(str).str.strip()
-            df_final['pagina'] = df_excel['Pagina'].astype(int)
-            df_final['cantidad'] = 0
-            st.session_state["df_album"] = df_final
+        st.error(f"Error de conexión: {e}")
+        df_bd = pd.DataFrame(columns=['id_lamina', 'cantidad'])
+
+    df_unido = pd.merge(df_excel, df_bd, left_on='Laminas', right_on='id_lamina', how='left')
+    df_unido['cantidad'] = df_unido['cantidad'].fillna(0).astype(int)
+    
+    df_final = pd.DataFrame()
+    df_final['id_lamina'] = df_unido['Laminas']
+    df_final['equipo'] = df_unido['Equipo'].astype(str).str.strip()
+    df_final['grupo'] = df_unido['Grupo'].astype(str).str.strip()
+    df_final['descripcion'] = df_unido['Descripicion'].astype(str).str.strip()
+    df_final['pagina'] = df_unido['Pagina'].astype(int)
+    df_final['cantidad'] = df_unido['cantidad']
+    
+    st.session_state["df_album"] = df_final.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
@@ -218,7 +225,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR
+    # PESTAÑA 2: NAVEGADOR (CON LA OPCIÓN DE TABLA MASIVA ADENTRO)
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -236,8 +243,16 @@ else:
             else:
                 st.info("✅ Todos los datos están guardados y sincronizados.")
         
+        # --- 🚨 MARCACIÓN DE OPCIÓN DE VISTA ALTERNATIVA ---
+        modo_vista = st.radio(
+            "Selecciona la interfaz de carga:",
+            ["Opcion 1: Vista Individual 📱", "Opcion 2: Vista Tabla (PC masiva) 💻"],
+            horizontal=True
+        )
+        
         df_nav = st.session_state["df_album"]
         
+        # FILTROS COMUNES PARA AMBAS VISTAS
         with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=False):
             col_b1, col_b2 = st.columns(2)
             with col_b1:
@@ -260,20 +275,16 @@ else:
             opciones_combo.append(f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})")
             
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
-
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
+        # Aplicación de filtros al DataFrame de la vista
         df_pagina_view = df_nav.copy()
         
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
             partes = seleccion_combo.split(" - ")
             pag_real = int(partes[0].replace("Pág. ", "").strip())
             equipo_real = partes[1].split(" (")[0].strip()
-            
-            df_pagina_view = df_pagina_view[
-                (df_pagina_view['pagina'] == pag_real) & 
-                (df_pagina_view['equipo'] == equipo_real)
-            ]
+            df_pagina_view = df_pagina_view[(df_pagina_view['pagina'] == pag_real) & (df_pagina_view['equipo'] == equipo_real)]
             
         if buscar_num.strip().isdigit():
             df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
@@ -296,34 +307,92 @@ else:
         if df_pagina_view.empty:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
-            st.write("---")
-            for _, lam in df_pagina_view.iterrows():
-                id_l = int(lam['id_lamina'])
-                cant_actual = lam['cantidad']
-                
-                if st.session_state["modo_rol"] == "admin":
-                    c_info, c_estado, c_controles = st.columns([2, 1.2, 1])
-                else:
-                    c_info, c_estado = st.columns([2.5, 1.5])
-                
-                with c_info:
-                    st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Grupo {lam['grupo']} • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
+            # ==========================================
+            # DESARROLLO DE LA OPCIÓN 1: INTERFAZ MÓVIL / INDIVIDUAL
+            # ==========================================
+            if "Opcion 1" in modo_vista:
+                st.write("---")
+                for _, lam in df_pagina_view.iterrows():
+                    id_l = int(lam['id_lamina'])
+                    cant_actual = lam['cantidad']
                     
-                with c_estado:
-                    if cant_actual == 0:
-                        st.error("Falta 🚨")
-                    elif cant_actual == 1:
-                        st.success("Tengo ✅")
+                    if st.session_state["modo_rol"] == "admin":
+                        c_info, c_estado, c_controles = st.columns([2, 1.2, 1])
                     else:
-                        st.warning(f"Repetidas: {cant_actual-1}")
+                        c_info, c_estado = st.columns([2.5, 1.5])
+                    
+                    with c_info:
+                        st.markdown(f"**Nº {id_l}** - {lam['descripcion']}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Grupo {lam['grupo']} • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
                         
-                if st.session_state["modo_rol"] == "admin":
-                    with c_controles:
-                        btn_col1, btn_col2 = st.columns(2)
-                        btn_col1.button("➕", key=f"add_{id_l}", on_click=registrar_cambio_local, args=(id_l, "sumar"))
-                        btn_col2.button("➖", key=f"sub_{id_l}", on_click=registrar_cambio_local, args=(id_l, "restar"))
+                    with c_estado:
+                        if cant_actual == 0:
+                            st.error("Falta 🚨")
+                        elif cant_actual == 1:
+                            st.success("Tengo ✅")
+                        else:
+                            st.warning(f"Repetidas: {cant_actual-1}")
                             
-                st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
+                    if st.session_state["modo_rol"] == "admin":
+                        with c_controles:
+                            btn_col1, btn_col2 = st.columns(2)
+                            btn_col1.button("➕", key=f"add_{id_l}", on_click=registrar_cambio_local, args=(id_l, "sumar"))
+                            btn_col2.button("➖", key=f"sub_{id_l}", on_click=registrar_cambio_local, args=(id_l, "restar"))
+                                
+                    st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
+            
+            # ==========================================
+            # DESARROLLO DE LA OPCIÓN 2: INTERFAZ TABLA (PC MASIVA)
+            # ==========================================
+            else:
+                st.write("---")
+                st.markdown("<p style='font-size: 13px; color: #555;'>💡 <b>Tip de velocidad:</b> Modifica los valores directamente en la columna <b>'cantidad'</b> de la tabla. Al terminar, dale clic al botón de arriba para sincronizar todo.</p>", unsafe_allow_html=True)
+                
+                # Configuración de edición editable o bloqueada según rol
+                if st.session_state["modo_rol"] == "admin":
+                    tabla_editada = st.data_editor(
+                        df_pagina_view,
+                        column_config={
+                            "id_lamina": st.column_config.NumberColumn("Nº Lámina", disabled=True, format="%d"),
+                            "equipo": st.column_config.TextColumn("⚽ Equipo", disabled=True),
+                            "grupo": st.column_config.TextColumn("🗂️ Grupo", disabled=True),
+                            "descripcion": st.column_config.TextColumn("📋 Descripción", disabled=True),
+                            "pagina": st.column_config.NumberColumn("📄 Pág", disabled=True, format="%d"),
+                            "cantidad": st.column_config.NumberColumn("🔢 Cantidad", min_value=0, max_value=99, step=1, required=True),
+                        },
+                        hide_index=True,
+                        use_container_width=True,
+                        key="editor_masivo_pc"
+                    )
+                    
+                    # Captura de cambios reactiva en la rejilla de la tabla
+                    if not tabla_editada.equals(df_pagina_view):
+                        for idx, fila in tabla_editada.iterrows():
+                            id_l = int(fila['id_lamina'])
+                            nueva_cant = int(fila['cantidad'])
+                            
+                            # Si detectamos que cambió el valor, actualizamos el Session State local
+                            idx_original = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_l].index
+                            if not idx_original.empty:
+                                val_actual = int(st.session_state["df_album"].loc[idx_original, 'cantidad'].values[0])
+                                if val_actual != nueva_cant:
+                                    st.session_state["df_album"].loc[idx_original, 'cantidad'] = nueva_cant
+                                    st.session_state["tiene_cambios"] = True
+                        st.rerun()
+                else:
+                    # Modo lectura bloquea la edición por completo
+                    st.dataframe(
+                        df_pagina_view,
+                        column_config={
+                            "id_lamina": st.column_config.NumberColumn("Nº Lámina", format="%d"),
+                            "equipo": "⚽ Equipo",
+                            "grupo": "🗂️ Grupo",
+                            "descripcion": "📋 Descripción",
+                            "pagina": st.column_config.NumberColumn("📄 Pág", format="%d"),
+                            "cantidad": "🔢 Cantidad",
+                        },
+                        hide_index=True,
+                        use_container_width=True
+                    )
 
     # PESTAÑA 3: PORCENTAJES
     with menu_principal[2]:
