@@ -335,13 +335,14 @@ else:
         str_tengo_completo = ", ".join([str(x) for x in sorted(tengo_lista)]) if tengo_lista else "Ninguna lámina registrada aún."
         txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026*\n\n📋 *Lista:* {str_tengo_completo}"
 
-        with st.expander("🚨 Ver y Copiar Lista de Faltantes"):
+        # TRES BOTONES ORIGINALES (Usando la visualización de código con el clipboard nativo de Streamlit integrado en la esquina superior derecha)
+        with st.expander("🚨 Ver y Copiar Lista de Faltantes", expanded=False):
             st.code(txt_faltan, language="text")
             
-        with st.expander("🔁 Ver y Copiar Lista de Repetidas"):
+        with st.expander("🔁 Ver y Copiar Lista de Repetidas", expanded=False):
             st.code(txt_repes, language="text")
             
-        with st.expander("✅ Ver y Copiar Lista de Lo Que Tengo"):
+        with st.expander("✅ Ver y Copiar Lista de Lo Que Tengo", expanded=False):
             st.code(txt_tengo, language="text")
 
         st.markdown("<p style='font-size:12px; color:#666; text-align:center; margin-top:5px;'>💡 Usa el icono de los dos cuadritos (esquina superior derecha de cada caja gris) para copiar el texto completo al portapapeles.</p>", unsafe_allow_html=True)
@@ -472,7 +473,7 @@ else:
             equipos_filtro = []
             if eq_a != "Ninguno": equipos_filtro.append(eq_a)
             if eq_b != "Ninguno": equipos_filtro.append(eq_b)
-            # Trae las láminas si corresponden al Equipo A o al Equipo B
+            # Trae las láminas si corresponden al Equipo A o al Equipo B (Lógica OR/isin)
             df_pagina_view = df_pagina_view[df_pagina_view['equipo'].isin(equipos_filtro)]
             filtro_busqueda_activo = True
 
@@ -534,7 +535,7 @@ else:
                         with st.expander(titulo_expander, expanded=desplegar_todos):
                             renderizar_cuadrícula_limpia(df_eq_sub)
                 else:
-                    # Si se activa Equipo A y/o Equipo B, renderiza directamente los cuadritos cruzados
+                    # Si se activa Equipo A y/o Equipo B, renderiza directamente los cuadritos cruzados en la raíz
                     renderizar_cuadrícula_limpia(df_pagina_view)
             else:
                 st.write("---")
