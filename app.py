@@ -96,7 +96,7 @@ if "df_album" not in st.session_state:
         if registros_en_bd == 0:
             for _, fila in df_excel.iterrows():
                 cur.execute("""
-                    INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
+                    INSERT INTO album_2026 (id_lamina, equipo, group, descripcion, pagina, cantidad)
                     VALUES (%s, %s, %s, %s, %s, 0);
                 """, (int(fila['Laminas']), str(fila['Equipo']).strip(), str(fila['Grupo']).strip(), str(fila['Descripicion']).strip(), int(fila['Pagina'])))
             conn.commit()
@@ -208,7 +208,6 @@ else:
         
         st.markdown("<h6 style='text-align: center; margin-bottom: 10px;'>📲 Compartir Listados Consecutivos (Uno a Uno)</h6>", unsafe_allow_html=True)
 
-        # Generación de las cadenas de datos
         str_faltan_completo = ", ".join([str(x) for x in sorted(faltan_lista)]) if faltan_lista else "¡Ninguna! Álbum lleno 🥳"
         txt_faltan = f"*🚨 MIS FALTANTES - ÁLBUM 2026*\n\nProgreso: {progreso_gen:.1f}%\n\n📋 *Lista:* {str_faltan_completo}"
         
@@ -219,45 +218,17 @@ else:
         str_tengo_completo = ", ".join([str(x) for x in sorted(tengo_lista)]) if tengo_lista else "Ninguna lámina registrada aún."
         txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026*\n\n📋 *Lista:* {str_tengo_completo}"
 
-        # --- BOTÓN 1: FALTANTES (CON EVALUACIÓN INTELIGENTE DE COPIADO + COLOR ROJO NATIVO) ---
-        IMPERFECCION_WHATSAPP_LIMIT = 1500 
-        
-        if len(txt_faltan) < IMPERFECCION_WHATSAPP_LIMIT:
-            url_faltan = f"https://api.whatsapp.com/send?text={quote(txt_faltan)}"
-            st.markdown(f"""
-                <a href="{url_faltan}" target="_blank" style="text-decoration: none;">
-                    <button style="background-color: #E74C3C; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">
-                        📲 Enviar Faltantes
-                    </button>
-                </a>
-            """, unsafe_allow_html=True)
-        else:
-            if "click_faltan" not in st.session_state:
-                st.session_state["click_faltan"] = False
+        # --- BOTÓN 1: ENVIAR FALTANTES (100% DIRECTO AUTOMÁTICO - ROJO ORIGINAL) ---
+        url_faltan = f"https://api.whatsapp.com/send?text={quote(txt_faltan)}"
+        st.markdown(f"""
+            <a href="{url_faltan}" target="_blank" style="text-decoration: none;">
+                <button style="background-color: #E74C3C; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">
+                    🚨 Enviar Faltantes
+                </button>
+            </a>
+        """, unsafe_allow_html=True)
 
-            # Inyectamos el estilo para que este botón de copia mantenga el color Rojo Vivo idéntico
-            st.markdown("""
-                <style>
-                    div.stButton > button[key^="btn_copy_faltan"] {
-                        background-color: #E74C3C !important;
-                        color: white !important;
-                    }
-                </style>
-            """, unsafe_allow_html=True)
-
-            if st.button("📲 Enviar Faltantes", key="btn_copy_faltan", use_container_width=True):
-                st.session_state["click_faltan"] = True
-                texto_escapado = txt_faltan.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
-                st.components.v1.html(f"""
-                    <script>
-                        navigator.clipboard.writeText('{texto_escapado}');
-                    </script>
-                """, height=0, width=0)
-            
-            if st.session_state["click_faltan"]:
-                st.success("📋 ¡Listado de Faltantes copiado! Es muy largo para enviarlo automático. Abre tu WhatsApp y dale Pegar.")
-
-        # --- BOTÓN 2: REPETIDAS (100% AUTOMÁTICO DIRECTO) ---
+        # --- BOTÓN 2: ENVIAR REPETIDAS (100% DIRECTO AUTOMÁTICO - NARANJA) ---
         url_repes = f"https://api.whatsapp.com/send?text={quote(txt_repes)}"
         st.markdown(f"""
             <a href="{url_repes}" target="_blank" style="text-decoration: none;">
@@ -267,7 +238,7 @@ else:
             </a>
         """, unsafe_allow_html=True)
 
-        # --- BOTÓN 3: LO QUE TENGO (100% AUTOMÁTICO DIRECTO) ---
+        # --- BOTÓN 3: ENVIAR LO QUE TENGO (100% DIRECTO AUTOMÁTICO - VERDE) ---
         url_tengo = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
         st.markdown(f"""
             <a href="{url_tengo}" target="_blank" style="text-decoration: none;">
@@ -360,9 +331,15 @@ else:
                                     st.html("</div>")
 
                 if seleccion_combo == "Ver Todo el Álbum (735 Láminas)" and buscar_equipo == "Todos los Equipos":
-                    for eq in df_pagina_view['equipo'].unique():
-                        df_eq_sub = df_pagina_view[df_pagina_view['equipo'] == eq]
-                        with st.expander(f"⚽ {eq} ({len(df_eq_sub)} láminas)", expanded=True):
+                    # --- VISTA AGRUPADA DINÁMICA CON DATOS ABREVIADOS Y CONTEO (TENGO/TOTAL) ---
+                    for (pag, eq, gr), df_eq_sub in df_pagina_view.groupby(['pagina', 'equipo', 'grupo'], sort=False):
+                        total_seccion = len(df_eq_sub)
+                        tengo_seccion = df_eq_sub[df_eq_sub['cantidad'] > 0]['id_lamina'].count()
+                        
+                        # Título formateado compacto: EQUIPO - Gr. X - Pág. Y (Tengo/Total)
+                        titulo_expander = f"⚽ {eq} — Gr. {gr} — Pág. {pag} ({tengo_seccion}/{total_seccion})"
+                        
+                        with st.expander(titulo_expander, expanded=True):
                             renderizar_cuadrícula_limpia(df_eq_sub)
                 else:
                     renderizar_cuadrícula_limpia(df_pagina_view)
@@ -371,7 +348,6 @@ else:
                 df_pc_visual = df_pagina_view.copy()
                 df_pc_visual['Estado Actual'] = df_pc_visual['cantidad'].apply(lambda c: "🔴 Falta" if c == 0 else ("🟢 Tengo" if c == 1 else f"🟠 Repetida (x{c})"))
                 
-                # Se renombran las columnas originales mapeando de forma segura para evitar el KeyError
                 df_pc_visual = df_pc_visual.rename(columns={'id_lamina': 'No.', 'equipo': 'Equipo', 'pagina': 'Pag.', 'cantidad': 'Cantidad'})
                 df_pc_final = df_pc_visual[['No.', 'Equipo', 'Pag.', 'Estado Actual', 'Cantidad']]
 
