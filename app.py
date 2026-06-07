@@ -7,23 +7,36 @@ import os
 # 1. CONFIGURACIÓN DE PÁGINA ESENCIAL
 st.set_page_config(page_title="Mi Álbum 2026", layout="centered")
 
-# --- ESTILOS CSS PERSONALIZADOS (AHORA ULTRA COMPACTOS) ---
+# --- ESTILOS CSS PERSONALIZADOS (ULTRA COMPACTOS) ---
 st.html("""
 <style>
-    /* Reduce el espacio vertical entre elementos consecutivos de Streamlit */
+    /* Minimiza el espacio vertical entre los bloques nativos de Streamlit */
     [data-testid="stVerticalBlock"] {
-        gap: 0.3rem !important;
+        gap: 0.15rem !important;
+    }
+    [data-testid="stVerticalBlockBorder"] {
+        padding: 0.2rem !important;
+        margin-bottom: 0.1rem !important;
     }
     
-    /* Estilos globales para botones de láminas */
+    /* Reduce el margen de los contenedores de las láminas */
+    div[id^="stHtmlContainer"] {
+        margin-bottom: 0px !important;
+        padding: 0px !important;
+    }
+
+    /* Estilos globales para botones de láminas (Cero desperdicio de espacio) */
     div.stButton > button {
-        border-radius: 8px !important;
+        border-radius: 6px !important;
         font-weight: bold !important;
         transition: transform 0.1s ease !important;
         border: none !important;
-        padding-top: 6px !important;
-        padding-bottom: 6px !important;
-        margin-bottom: 2px !important;
+        padding-top: 2px !important;
+        padding-bottom: 2px !important;
+        margin-top: 0px !important;
+        margin-bottom: 0px !important;
+        height: auto !important;
+        min-height: 0px !important;
     }
     div.stButton > button:active {
         transform: scale(0.95) !important;
@@ -318,7 +331,6 @@ else:
             if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
                 
-                # Selector de acción superior modificado según tus indicaciones
                 modo_click = "➕ Incrementar (+1)"
                 if st.session_state["modo_rol"] == "admin":
                     modo_click = st.radio(
@@ -376,18 +388,34 @@ else:
                 st.markdown("<br>", unsafe_allow_html=True)
             
             # ==========================================================
-            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA
+            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (CON REPETIDAS NARANJA 🟠)
             # ==========================================================
             else:
                 st.write("---")
                 df_ultra_reducido_pc = df_pagina_view[['id_lamina', 'equipo', 'pagina', 'cantidad']].copy()
+                
+                # Generamos una columna visual de estado para representar los colores correctos mediante emojis de inventario
+                def mapear_estado_visual(cant):
+                    if cant == 0:
+                        return "🔴 Falta"
+                    elif cant == 1:
+                        return "🟢 Tengo"
+                    else:
+                        return f"🟠 Repetida (x{cant})"
+                        
+                df_ultra_reducido_pc['Estado'] = df_ultra_reducido_pc['cantidad'].apply(mapear_estado_visual)
                 df_ultra_reducido_pc = df_ultra_reducido_pc.rename(columns={'id_lamina': 'No.', 'pagina': 'Pag.'})
                 
+                # Reorganizamos el orden para priorizar la edición limpia
+                df_ultra_reducido_pc = df_ultra_reducido_pc[['No.', '⚽ Equipo', 'Pag.', 'Estado', 'cantidad']]
+                df_ultra_reducido_pc.columns = ['No.', '⚽ Equipo', 'Pag.', 'Estado Actual', '🔢 Cantidad']
+
                 config_columnas_pc = {
-                    "No.": st.column_config.NumberColumn("No.", format="%d", pinned=True, width=45),
-                    "equipo": st.column_config.TextColumn("⚽ Equipo", pinned=True, width=140),
-                    "Pag.": st.column_config.NumberColumn("Pag.", format="%d", pinned=True, width=45),
-                    "cantidad": st.column_config.NumberColumn("🔢 Cantidad", min_value=0, max_value=99, step=1, required=True, width=85),
+                    "No.": st.column_config.NumberColumn("No.", format="%d", pinned=True, width=50),
+                    "⚽ Equipo": st.column_config.TextColumn("⚽ Equipo", pinned=True, width=150),
+                    "Pag.": st.column_config.NumberColumn("Pag.", format="%d", width=50),
+                    "Estado Actual": st.column_config.TextColumn("📋 Estado Actual", width=140),
+                    "🔢 Cantidad": st.column_config.NumberColumn("🔢 Editar Cantidad", min_value=0, max_value=99, step=1, required=True, width=110),
                 }
 
                 if st.session_state["modo_rol"] == "admin":
@@ -396,13 +424,15 @@ else:
                         column_config=config_columnas_pc,
                         hide_index=True,
                         use_container_width=True,
+                        disabled=["No.", "⚽ Equipo", "Pag.", "Estado Actual"],
                         key="editor_masivo_pc"
                     )
                     
-                    if not tabla_editada.equals(df_ultra_reducido_pc):
+                    # Verificación de cambios interactivos
+                    if not tabla_editada['🔢 Cantidad'].equals(df_ultra_reducido_pc['🔢 Cantidad']):
                         for idx, fila in tabla_editada.iterrows():
                             id_l = int(fila['No.'])
-                            nueva_cant = int(fila['cantidad'])
+                            nueva_cant = int(fila['🔢 Cantidad'])
                             
                             idx_original = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_l].index
                             if not idx_original.empty:
@@ -413,7 +443,7 @@ else:
                         st.rerun()
                 else:
                     st.dataframe(
-                        df_ultra_reducido_pc,
+                        df_ultra_reducido_pc.drop(columns=['🔢 Cantidad']),
                         column_config=config_columnas_pc,
                         hide_index=True,
                         use_container_width=True
@@ -424,6 +454,7 @@ else:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
         sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
         
+        # ... [El resto de la pestaña 3 se mantiene idéntico e intacto para no alterar tus reportes]
         df_stats = st.session_state["df_album"].copy()
         df_stats['tiene'] = df_stats['cantidad'].apply(lambda x: 1 if x > 0 else 0)
         
