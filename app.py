@@ -7,7 +7,7 @@ import os
 # 1. CONFIGURACIÓN DE PÁGINA ESENCIAL
 st.set_page_config(page_title="Mi Álbum 2026", layout="centered")
 
-# --- ESTILOS CSS PERSONALIZADOS (ULTRA COMPACTOS) ---
+# --- ESTILOS CSS PERSONALIZADOS (ALINEACIÓN FIJA Y ULTRA COMPACTOS) ---
 st.html("""
 <style>
     /* Minimiza el espacio vertical entre los bloques nativos de Streamlit */
@@ -25,7 +25,7 @@ st.html("""
         padding: 0px !important;
     }
 
-    /* Estilos globales para botones de láminas (Cero desperdicio de espacio) */
+    /* Estilos globales para botones de láminas (Altura fija estricta para evitar desalineaciones) */
     div.stButton > button {
         border-radius: 6px !important;
         font-weight: bold !important;
@@ -35,8 +35,14 @@ st.html("""
         padding-bottom: 2px !important;
         margin-top: 0px !important;
         margin-bottom: 0px !important;
-        height: auto !important;
-        min-height: 0px !important;
+        height: 52px !important; /* Mantiene la misma altura en todas las láminas */
+        min-height: 52px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+        line-height: 1.1 !important;
+        font-size: 13px !important;
     }
     div.stButton > button:active {
         transform: scale(0.95) !important;
@@ -326,7 +332,7 @@ else:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
             # ==========================================================
-            # OPCIÓN 1: INTERFAZ MÓVIL (MATRIZ ULTRA COMPACTA)
+            # OPCIÓN 1: INTERFAZ MÓVIL (MATRIZ ULTRA COMPACTA ALINEADA)
             # ==========================================================
             if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
@@ -388,13 +394,12 @@ else:
                 st.markdown("<br>", unsafe_allow_html=True)
             
             # ==========================================================
-            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (CON REPETIDAS NARANJA 🟠)
+            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA
             # ==========================================================
             else:
                 st.write("---")
                 df_ultra_reducido_pc = df_pagina_view[['id_lamina', 'equipo', 'pagina', 'cantidad']].copy()
                 
-                # Generamos una columna visual de estado para representar los colores correctos mediante emojis de inventario
                 def mapear_estado_visual(cant):
                     if cant == 0:
                         return "🔴 Falta"
@@ -406,7 +411,6 @@ else:
                 df_ultra_reducido_pc['Estado'] = df_ultra_reducido_pc['cantidad'].apply(mapear_estado_visual)
                 df_ultra_reducido_pc = df_ultra_reducido_pc.rename(columns={'id_lamina': 'No.', 'pagina': 'Pag.'})
                 
-                # Reorganizamos el orden para priorizar la edición limpia
                 df_ultra_reducido_pc = df_ultra_reducido_pc[['No.', '⚽ Equipo', 'Pag.', 'Estado', 'cantidad']]
                 df_ultra_reducido_pc.columns = ['No.', '⚽ Equipo', 'Pag.', 'Estado Actual', '🔢 Cantidad']
 
@@ -428,7 +432,6 @@ else:
                         key="editor_masivo_pc"
                     )
                     
-                    # Verificación de cambios interactivos
                     if not tabla_editada['🔢 Cantidad'].equals(df_ultra_reducido_pc['🔢 Cantidad']):
                         for idx, fila in tabla_editada.iterrows():
                             id_l = int(fila['No.'])
@@ -454,7 +457,6 @@ else:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
         sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
         
-        # ... [El resto de la pestaña 3 se mantiene idéntico e intacto para no alterar tus reportes]
         df_stats = st.session_state["df_album"].copy()
         df_stats['tiene'] = df_stats['cantidad'].apply(lambda x: 1 if x > 0 else 0)
         
