@@ -1,15 +1,3 @@
-¡Hágale, Julián! Entendido perfectamente. Vamos a dejar las dos opciones conviviendo en paz en la pestaña del Navegador de Láminas:
-
-La opción 1 (Actual): El inventario consecutivo, lámina por lámina con los botones de ➕ y ➖, ideal para cuando estás con el celular en la mano pegando láminas físicamente.
-
-La opción 2 (Nueva Alternativa - Vista Tabla / PC Masiva): Un buscador y una tabla interactiva (st.data_editor) optimizada para PC. Con esta opción vas a poder tirar filtros rápidos, ver muchas filas al tiempo en modo rejilla y digitar o pegar las cantidades en lote de forma masiva y súper veloz antes de hundir el botón de guardar.
-
-Para activar esto de forma limpia y con una marcación clara dentro de la pestaña, implementé un st.radio tipo selector arriba del navegador para que elijas con qué "Modo de Vista" querés trabajar.
-
-Aquí tenés el código seguro (manteniendo el flujo de protección de datos sin el DROP TABLE) con la nueva funcionalidad masiva habilitada:
-
-Código Completo Habilitando "Opción PC Masiva"
-Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
