@@ -165,7 +165,7 @@ def ejecutar_accion_lamina(id_lamina, modo_accion):
             nueva_cant = actual + 1
         elif "➖" in modo_accion and actual > 0:
             nueva_cant = actual - 1
-        elif "🛑" in modo_accion:
+        elif "🛑" in modo_accion or "No la tengo" in modo_accion:
             nueva_cant = 0
             
         st.session_state["df_album"].loc[idx, 'cantidad'] = nueva_cant
@@ -224,6 +224,8 @@ else:
 
         tengo_lista = df_gen[df_gen['cantidad'] > 0]['id_lamina'].tolist()
         faltan_lista = df_gen[df_gen['cantidad'] == 0]['id_lamina'].tolist()
+        
+        # Diccionario para formatear las repetidas detalladamente
         repes_dict = df_gen[df_gen['cantidad'] > 1].set_index('id_lamina')['es_repetida'].to_dict()
 
         total_laminas = len(df_gen)
@@ -244,20 +246,46 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("<h6 style='text-align: center;'>📲 Enviar Reportes Directos a WhatsApp</h6>", unsafe_allow_html=True)
+        st.markdown("<h6 style='text-align: center;'>📋 Generar Listados Completos (Uno a Uno)</h6>", unsafe_allow_html=True)
+        st.info("Haz clic en 'Copiar Listado' y pégalo directamente en tu chat de WhatsApp. ¡Así se envían completos sin importar el largo!")
+
+        # --- 1. BOTÓN DE FALTANTES (COMPLETO) ---
+        str_faltan_completo = ", ".join([str(x) for x in sorted(faltan_lista)]) if faltan_lista else "¡Ninguna! Álbum lleno 🥳"
+        txt_faltan = f"*🚨 MIS FALTANTES - ÁLBUM 2026* 🏆\n\nProgreso: {progreso_gen:.1f}% ({total_tengo}/{total_laminas})\n\n📋 *Faltan las siguientes láminas:*\n{str_faltan_completo}"
         
-        txt_faltan = f"*🚨 MIS FALTANTES - ÁLBUM 2026* 🏆\n\nProgreso: {progreso_gen:.1f}% ({total_tengo}/{total_laminas})\n\n📋 *Faltan:* " + ", ".join([str(x) for x in faltan_lista[:80]]) + ("..." if len(faltan_lista) > 80 else "")
-        link_f = f"https://api.whatsapp.com/send?text={quote(txt_faltan)}"
-        st.markdown(f'<a href="{link_f}" target="_blank"><button style="background-color:#E74C3C;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;margin-bottom:8px;">📋 Compartir Faltantes</button></a>', unsafe_allow_html=True)
+        col_f_btn, col_f_cp = st.columns([3.5, 1.5])
+        with col_f_btn:
+            link_f = f"https://api.whatsapp.com/send?text={quote(txt_faltan[:1500] + '... (Usa el botón Copiar para el texto completo)')}"
+            st.markdown(f'<a href="{link_f}" target="_blank"><button style="background-color:#E74C3C;color:white;border:none;padding:8px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">📲 Enviar Faltantes</button></a>', unsafe_allow_html=True)
+        with col_f_cp:
+            st.copy_text_button("📋 Copiar Listado", text=txt_faltan, use_container_width=True)
 
-        lista_repes_format = [f"{k}(x{v})" for k, v in repes_dict.items()]
-        txt_repes = f"*🔁 MIS REPETIDAS - ÁLBUM 2026* 🏆\n\nTengo {total_repes} repetidas:\n\n" + (", ".join(lista_repes_format[:80]) if lista_repes_format else "Ninguna por ahora 👍")
-        link_r = f"https://api.whatsapp.com/send?text={quote(txt_repes)}"
-        st.markdown(f'<a href="{link_r}" target="_blank"><button style="background-color:#F39C12;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;margin-bottom:8px;">🔁 Compartir Repetidas</button></a>', unsafe_allow_html=True)
+        st.write("")
 
-        txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026* 🏆\n\nMis láminas pegadas:\n\n" + ", ".join([str(x) for x in tengo_lista[:80]]) + ("..." if len(tengo_lista) > 80 else "")
-        link_t = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
-        st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
+        # --- 2. BOTÓN DE REPETIDAS (COMPLETO) ---
+        lista_repes_format = [f"{k}(x{v})" for k, v in sorted(repes_dict.items())]
+        str_repes_completo = ", ".join(lista_repes_format) if lista_repes_format else "Ninguna por ahora 👍"
+        txt_repes = f"*🔁 MIS REPETIDAS - ÁLBUM 2026* 🏆\n\nTengo {total_repes} repetidas:\n\n{str_repes_completo}"
+        
+        col_r_btn, col_r_cp = st.columns([3.5, 1.5])
+        with col_r_btn:
+            link_r = f"https://api.whatsapp.com/send?text={quote(txt_repes[:1500] + '... (Usa el botón Copiar para el texto completo)')}"
+            st.markdown(f'<a href="{link_r}" target="_blank"><button style="background-color:#F39C12;color:white;border:none;padding:8px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">📲 Enviar Repetidas</button></a>', unsafe_allow_html=True)
+        with col_r_cp:
+            st.copy_text_button("📋 Copiar Listado", text=txt_repes, use_container_width=True)
+
+        st.write("")
+
+        # --- 3. BOTÓN DE LO QUE TENGO (COMPLETO) ---
+        str_tengo_completo = ", ".join([str(x) for x in sorted(tengo_lista)]) if tengo_lista else "Ninguna lámina registrada aún."
+        txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026* 🏆\n\nMis láminas pegadas:\n\n{str_tengo_completo}"
+        
+        col_t_btn, col_t_cp = st.columns([3.5, 1.5])
+        with col_t_btn:
+            link_t = f"https://api.whatsapp.com/send?text={quote(txt_tengo[:1500] + '... (Usa el botón Copiar para el texto completo)')}"
+            st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:8px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">📲 Enviar Lo Que Tengo</button></a>', unsafe_allow_html=True)
+        with col_t_cp:
+            st.copy_text_button("📋 Copiar Listado", text=txt_tengo, use_container_width=True)
 
 
     # PESTAÑA 2: NAVEGADOR DE LÁMINAS
@@ -265,7 +293,7 @@ else:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
         else:
-            st.success("🔑 Modo Administrator Activo. Los cambios se guardan automáticamente en tiempo real ⚡")
+            st.success("🔑 Modo Administrador Activo. Sincronización en tiempo real con la nube ⚡")
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
@@ -394,7 +422,7 @@ else:
                 st.markdown("<br>", unsafe_allow_html=True)
             
             # ==========================================================
-            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (CORREGIDA SIN ERROR)
+            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (PC)
             # ==========================================================
             else:
                 st.write("---")
@@ -411,7 +439,6 @@ else:
                 df_ultra_reducido_pc['Estado'] = df_ultra_reducido_pc['cantidad'].apply(mapear_estado_visual)
                 df_ultra_reducido_pc = df_ultra_reducido_pc.rename(columns={'id_lamina': 'No.', 'pagina': 'Pag.'})
                 
-                # CORRECCIÓN AQUÍ: Se usan los nombres de columna correctos para evitar KeyError
                 df_ultra_reducido_pc = df_ultra_reducido_pc[['No.', 'equipo', 'Pag.', 'Estado', 'cantidad']]
                 df_ultra_reducido_pc.columns = ['No.', '⚽ Equipo', 'Pag.', 'Estado Actual', '🔢 Cantidad']
 
