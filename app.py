@@ -12,17 +12,17 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🚀 CONTROL ABSOLUTO: SECUENCIA ESTRICTA DE TU EXCEL ---
+# --- 🚀 CONTROL ABSOLUTO: ORDEN NATURAL DE TU EXCEL ---
 if "df_album" not in st.session_state:
     archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     
     try:
-        # 1. Leer tu Excel real respetando tus páginas de forma estricta
+        # 1. Leer el archivo Excel real respetando tus columnas
         df_excel = pd.read_excel(archivo_excel)
         df_excel['Laminas'] = df_excel['Laminas'].astype(int)
         df_excel['Pagina'] = df_excel['Pagina'].astype(int)
         
-        # 2. Leer cantidades de Postgres sin alterar nada en el servidor
+        # 2. Traer las cantidades guardadas en Postgres
         conn = get_connection()
         df_bd = pd.read_sql_query("SELECT id_lamina, cantidad FROM album_2026;", conn)
         conn.close()
@@ -32,7 +32,7 @@ if "df_album" not in st.session_state:
     except Exception as e:
         df_bd = pd.DataFrame(columns=['id_lamina', 'cantidad'])
 
-    # 3. Cruzar datos manteniendo el orden exacto de las filas del Excel
+    # 3. Unir los datos manteniendo el orden de filas exacto de tu Excel
     df_unido = pd.merge(
         df_excel, df_bd, 
         left_on='Laminas', right_on='id_lamina', 
@@ -41,7 +41,7 @@ if "df_album" not in st.session_state:
     
     df_unido['cantidad'] = df_unido['cantidad'].fillna(0).astype(int)
     
-    # Construcción limpia para la app
+    # Mapeo limpio respetando tus nombres de columna del Excel
     df_final = pd.DataFrame()
     df_final['id_lamina'] = df_unido['Laminas']
     df_final['equipo'] = df_unido['Equipo'].astype(str).str.strip()
@@ -50,7 +50,7 @@ if "df_album" not in st.session_state:
     df_final['pagina'] = df_unido['Pagina'].astype(int)
     df_final['cantidad'] = df_unido['cantidad']
     
-    # Se guarda en el estado ordenado estrictamente por el número consecutivo original
+    # Guardamos en la sesión ordenando por número de lámina consecutivo (1 al 735)
     st.session_state["df_album"] = df_final.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
 if "tiene_cambios" not in st.session_state:
@@ -200,7 +200,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR (FILTRADO ABSOLUTO POR CAMPOS DEL EXCEL)
+    # PESTAÑA 2: NAVEGADOR (CONSECUCIÓN REAL DE TU EXCEL)
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -225,6 +225,7 @@ else:
             with col_b1:
                 buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="", placeholder="Ej: 16")
             with col_b2:
+                # Agrupar sin ordenar alfabéticamente para mantener el orden de llegada
                 lista_equipos_filtro = ["Todos los Equipos"] + list(df_nav.groupby('equipo', sort=False).first().index)
                 buscar_equipo = st.selectbox("⚽ Filtrar por Equipo:", lista_equipos_filtro)
                 
@@ -236,7 +237,7 @@ else:
                 paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())]
                 buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
 
-        # Agrupamos respetando el orden de tus filas en el Excel
+        # ✨ ORDEN NATURAL GARANTIZADO: Leemos fila por fila tu archivo usando sort=False
         secciones_unicas = df_nav.groupby(['pagina', 'equipo', 'grupo'], sort=False).size().reset_index()
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"]
         for _, r in secciones_unicas.iterrows():
@@ -248,15 +249,12 @@ else:
 
         df_pagina_view = df_nav.copy()
         
-        # ✨ SOLUCIÓN AL PROBLEMA DE QATAR: Filtramos usando los textos exactos de Equipo y Grupo
+        # Filtramos cruzando estrictamente el número de la página y el nombre exacto del equipo para que no se crucen cables
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
             partes = seleccion_combo.split(" - ")
-            # Sacamos la página real numérica
             pag_real = int(partes[0].replace("Pág. ", "").strip())
-            # Sacamos el nombre del equipo limpio
             equipo_real = partes[1].split(" (")[0].strip()
             
-            # Filtramos cruzando obligatoriamente Página + Equipo para evitar choques
             df_pagina_view = df_pagina_view[
                 (df_pagina_view['pagina'] == pag_real) & 
                 (df_pagina_view['equipo'] == equipo_real)
@@ -271,13 +269,7 @@ else:
         if buscar_por_pagina != "Todas las Páginas":
             df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
 
-        if filtro_inventario == "Solo Faltantes 🚨":
-            df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
-        elif filtro_inventario == "Solo las que Tengo ✅":
-            df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 0]
-        elif filtro_inventario == "Solo Repetidas 🔁":
-            df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
-
+        # Mantenemos siempre las láminas organizadas consecutivamente (1 al 735)
         df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
 
         if df_pagina_view.empty:
