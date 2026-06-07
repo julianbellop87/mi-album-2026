@@ -50,7 +50,7 @@ if "df_album" not in st.session_state:
     df_final['pagina'] = df_unido['Pagina'].astype(int)
     df_final['cantidad'] = df_unido['cantidad']
     
-    # IMPORTANTE: Se ordena estrictamente por el orden consecutivo de lámina del Excel
+    # Se guarda en el estado ordenado estrictamente por el número consecutivo original
     st.session_state["df_album"] = df_final.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
 if "tiene_cambios" not in st.session_state:
@@ -69,7 +69,7 @@ def registrar_cambio_local(id_lamina, operacion):
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
 
-# --- GUARDADO REMOTO ULTRA SEGURO ---
+# --- GUARDADO REMOTO ---
 def forzar_sincronizacion_bd():
     with st.spinner("Sincronizando inventario con Postgres..."):
         try:
@@ -200,7 +200,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR CORREGIDO (Fiel a tus filas del Excel)
+    # PESTAÑA 2: NAVEGADOR (FILTRADO ABSOLUTO POR CAMPOS DEL EXCEL)
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -225,7 +225,6 @@ else:
             with col_b1:
                 buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="", placeholder="Ej: 16")
             with col_b2:
-                # Mantenemos el orden natural del Excel, sin reordenar alfabéticamente
                 lista_equipos_filtro = ["Todos los Equipos"] + list(df_nav.groupby('equipo', sort=False).first().index)
                 buscar_equipo = st.selectbox("⚽ Filtrar por Equipo:", lista_equipos_filtro)
                 
@@ -237,7 +236,7 @@ else:
                 paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())]
                 buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
 
-        # ✨ SOLUCIÓN DE LA PAGINACIÓN: Armar el menú respetando estrictamente el orden de aparición en tu Excel
+        # Agrupamos respetando el orden de tus filas en el Excel
         secciones_unicas = df_nav.groupby(['pagina', 'equipo', 'grupo'], sort=False).size().reset_index()
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"]
         for _, r in secciones_unicas.iterrows():
@@ -248,12 +247,20 @@ else:
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
         df_pagina_view = df_nav.copy()
+        
+        # ✨ SOLUCIÓN AL PROBLEMA DE QATAR: Filtramos usando los textos exactos de Equipo y Grupo
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
-            # Extraemos el número de página exacto seleccionado del combo
-            pagina_seleccionada = int(seleccion_combo.split(" ")[1])
-            # Extraemos el equipo para no cruzar páginas que tengan el mismo número en otro lado
-            equipo_seleccionado = seleccion_combo.split(" - ")[1].split(" (")[0]
-            df_pagina_view = df_pagina_view[(df_pagina_view['pagina'] == pagina_seleccionada) & (df_pagina_view['equipo'] == equipo_seleccionado)]
+            partes = seleccion_combo.split(" - ")
+            # Sacamos la página real numérica
+            pag_real = int(partes[0].replace("Pág. ", "").strip())
+            # Sacamos el nombre del equipo limpio
+            equipo_real = partes[1].split(" (")[0].strip()
+            
+            # Filtramos cruzando obligatoriamente Página + Equipo para evitar choques
+            df_pagina_view = df_pagina_view[
+                (df_pagina_view['pagina'] == pag_real) & 
+                (df_pagina_view['equipo'] == equipo_real)
+            ]
             
         if buscar_num.strip().isdigit():
             df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
