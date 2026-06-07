@@ -102,7 +102,7 @@ if "df_album" not in st.session_state:
         if registros_en_bd == 0:
             for _, fila in df_excel.iterrows():
                 cur.execute("""
-                    INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
+                    INSERT INTO album_2026 (id_lamina, equipo, groupo, descripcion, pagina, cantidad)
                     VALUES (%s, %s, %s, %s, %s, 0);
                 """, (int(fila['Laminas']), str(fila['Equipo']).strip(), str(fila['Grupo']).strip(), str(fila['Descripicion']).strip(), int(fila['Pagina'])))
             conn.commit()
@@ -323,7 +323,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("<h6 style='text-align: center; margin-bottom: 10px;'>📋 Listados Completos para Compartir</h6>", unsafe_allow_html=True)
+        st.markdown("<h6 style='text-align: center; margin-bottom: 10px;'>📋 Generar Listados Completos (Uno a Uno)</h6>", unsafe_allow_html=True)
 
         str_faltan_completo = ", ".join([str(x) for x in sorted(faltan_lista)]) if faltan_lista else "¡Ninguna! Álbum lleno 🥳"
         txt_faltan = f"*🚨 MIS FALTANTES - ÁLBUM 2026*\n\nProgreso: {progreso_gen:.1f}%\n\n📋 *Lista:* {str_faltan_completo}"
@@ -335,18 +335,20 @@ else:
         str_tengo_completo = ", ".join([str(x) for x in sorted(tengo_lista)]) if tengo_lista else "Ninguna lámina registrada aún."
         txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026*\n\n📋 *Lista:* {str_tengo_completo}"
 
-        # TRES BOTONES ORIGINALES (Usando la visualización de código con el clipboard nativo de Streamlit integrado en la esquina superior derecha)
-        with st.expander("🚨 Ver y Copiar Lista de Faltantes", expanded=False):
+        # --- 🔧 SOLUCIÓN AL ERROR DE ATRIBUTO ---
+        # Reemplazamos la función inexistente por un bloque limpio de visualización y copiado integrado nativo de Streamlit
+        with st.expander("🚨 Ver y Copiar Lista de Faltantes"):
             st.code(txt_faltan, language="text")
             
-        with st.expander("🔁 Ver y Copiar Lista de Repetidas", expanded=False):
+        with st.expander("🔁 Ver y Copiar Lista de Repetidas"):
             st.code(txt_repes, language="text")
             
-        with st.expander("✅ Ver y Copiar Lista de Lo Que Tengo", expanded=False):
+        with st.expander("✅ Ver y Copiar Lista de Lo Que Tengo"):
             st.code(txt_tengo, language="text")
 
-        st.markdown("<p style='font-size:12px; color:#666; text-align:center; margin-top:5px;'>💡 Usa el icono de los dos cuadritos (esquina superior derecha de cada caja gris) para copiar el texto completo al portapapeles.</p>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size:12px; color:#666; text-align:center; margin-top:5px;'>💡 Puedes usar el icono de dos cuadritos en la esquina superior derecha de cada caja de arriba para copiar el texto completo al portapapeles al instante.</p>", unsafe_allow_html=True)
 
+        # Enlaces de envío rápido automático por WhatsApp API
         url_faltan = f"https://api.whatsapp.com/send?text={quote(txt_faltan)}"
         st.markdown(f'<a href="{url_faltan}" target="_blank" style="text-decoration: none;"><button style="background-color: #E74C3C; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">📲 Compartir Faltantes por WhatsApp</button></a>', unsafe_allow_html=True)
 
@@ -415,7 +417,7 @@ else:
         modo_vista = st.radio("Selecciona la interfaz de carga:", ["Opcion 1: Vista Individual 📱", "Opcion 2: Vista Tabla (PC masiva) 💻"], horizontal=True)
         df_nav = st.session_state["df_album"]
         
-        # --- 🔍 BUSCADORES ESPECIALIZADOS (AQUÍ ESTÁ TU FILTRO CRUZADO MULTI-SELECCIÓN) ---
+        # --- ⚽ SOLUCIÓN E IMPLEMENTACIÓN DEL FILTRO CRUZADO EQUIPO A Y EQUIPO B ---
         with st.expander("🔍 Buscadores Especializados", expanded=True):
             col_b1, col_b2 = st.columns([1.5, 2])
             with col_b1: 
@@ -448,36 +450,37 @@ else:
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Faltantes", "Tengo", "Repetidas"], horizontal=True)
 
+        # Lógica de filtros en cascada
         df_pagina_view = df_nav.copy()
         
-        # 1. Filtro combo de sección completa
+        # 1. Aplicar filtro de Sección Completa si está seleccionado
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
             partes = seleccion_combo.split(" - ")
             pag_real = int(partes[0].replace("Pág. ", "").strip())
             equipo_real = partes[1].split(" (")[0].strip()
             df_pagina_view = df_pagina_view[(df_pagina_view['pagina'] == pag_real) & (df_pagina_view['equipo'] == equipo_real)]
             
-        # 2. Filtro búsqueda por número directo
+        # 2. Aplicar búsqueda directa por número
         filtro_busqueda_activo = False
         if buscar_num.strip().isdigit(): 
             df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
             filtro_busqueda_activo = True
             
-        # 3. Filtro escudos
+        # 3. Aplicar filtro especial de escudos
         if buscar_escudos:
             df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.contains('Escudo|Especial', case=False, na=False)]
             filtro_busqueda_activo = True
             
-        # 4. 🔀 LÓGICA DE FILTRADO COMBINADO (EQUIPO A + EQUIPO B SIMULTÁNEOS)
+        # 4. APLICACIÓN LOGICA DEL FILTRO CRUZADO MULTI-EQUIPO (A y B simultáneos)
         if eq_a != "Ninguno" or eq_b != "Ninguno":
             equipos_filtro = []
             if eq_a != "Ninguno": equipos_filtro.append(eq_a)
             if eq_b != "Ninguno": equipos_filtro.append(eq_b)
-            # Trae las láminas si corresponden al Equipo A o al Equipo B (Lógica OR/isin)
+            # Filtra las láminas que pertenezcan a cualquiera de los dos países seleccionados
             df_pagina_view = df_pagina_view[df_pagina_view['equipo'].isin(equipos_filtro)]
             filtro_busqueda_activo = True
 
-        # 5. Estado inventario
+        # 5. Estado del inventario
         if filtro_inventario == "Faltantes": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
         elif filtro_inventario == "Tengo": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 0]
         elif filtro_inventario == "Repetidas": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
@@ -526,7 +529,7 @@ else:
                                         st.button(label_render, key=f"btn_view_{id_l}", disabled=True, use_container_width=True)
                                     st.html("</div>")
 
-                # Si no hay filtros de países activos, agrupamos ordenadamente por expanders de páginas
+                # Si no hay filtros de equipos, agrupamos normalmente por sección expandible
                 if seleccion_combo == "Ver Todo el Álbum (735 Láminas)" and eq_a == "Ninguno" and eq_b == "Ninguno":
                     for (pag, eq, gr), df_eq_sub in df_pagina_view.groupby(['pagina', 'equipo', 'grupo'], sort=False):
                         total_seccion = len(df_eq_sub)
@@ -535,7 +538,7 @@ else:
                         with st.expander(titulo_expander, expanded=desplegar_todos):
                             renderizar_cuadrícula_limpia(df_eq_sub)
                 else:
-                    # Si se activa Equipo A y/o Equipo B, renderiza directamente los cuadritos cruzados en la raíz
+                    # Si filtramos Equipo A o B, pintamos los cuadros directo en la pantalla principal
                     renderizar_cuadrícula_limpia(df_pagina_view)
             else:
                 st.write("---")
