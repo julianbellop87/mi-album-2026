@@ -1,3 +1,17 @@
+¡Quedó excelente! He revisado detalladamente las capturas de la aplicación corriendo en el móvil. Los títulos compactos con formato ⚽ Equipo — Gr. X — Pág. Y (Tengo/Total) se ven impecables y muy limpios en la pantalla.
+
+Para solucionar la navegación y evitar tener que abrir o cerrar manualmente cada acordeón cuando están todos cargados al tiempo, implementamos el control inteligente que pides:
+
+⚙️ Cambios aplicados:
+Control Global de Acordeones (st.toggle): Añadimos un interruptor visual justo arriba que dice "Desplegar todas las secciones 📖".
+
+Comportamiento Inteligente: * Si el usuario selecciona "Ver Todo el Álbum (735 Láminas)" y no hay filtros de búsqueda activos (es decir, la lista es gigantesca), por defecto los acordeones se quedan cerrados (expanded=False) para garantizar un desplazamiento rápido y fluido, a menos que actives el interruptor general.
+
+Si realizas una búsqueda específica o seleccionas un equipo puntual, el sistema asume que quieres gestionarlo de inmediato y los muestra abiertos automáticamente para ahorrarte clics.
+
+Aquí tienes el script definitivo y optimizado con esta nueva lógica de navegación móvil:
+
+Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
@@ -282,10 +296,20 @@ else:
             equipo_real = partes[1].split(" (")[0].strip()
             df_pagina_view = df_pagina_view[(df_pagina_view['pagina'] == pag_real) & (df_pagina_view['equipo'] == equipo_real)]
             
-        if buscar_num.strip().isdigit(): df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
-        if buscar_equipo != "Todos los Equipos": df_pagina_view = df_pagina_view[df_pagina_view['equipo'] == buscar_equipo]
-        if buscar_grupo != "Todos los Grupos": df_pagina_view = df_pagina_view[df_pagina_view['grupo'] == buscar_grupo]
-        if buscar_por_pagina != "Todas las Páginas": df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
+        # Variables de control para saber si hay filtros manuales de búsqueda activos
+        filtro_busqueda_activo = False
+        if buscar_num.strip().isdigit(): 
+            df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
+            filtro_busqueda_activo = True
+        if buscar_equipo != "Todos los Equipos": 
+            df_pagina_view = df_pagina_view[df_pagina_view['equipo'] == buscar_equipo]
+            filtro_busqueda_activo = True
+        if buscar_grupo != "Todos los Grupos": 
+            df_pagina_view = df_pagina_view[df_pagina_view['grupo'] == buscar_grupo]
+            filtro_busqueda_activo = True
+        if buscar_por_pagina != "Todas las Páginas": 
+            df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
+            filtro_busqueda_activo = True
 
         if filtro_inventario == "Solo Faltantes 🚨": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
         elif filtro_inventario == "Solo las que Tengo ✅": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 0]
@@ -298,6 +322,15 @@ else:
         else:
             if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
+                
+                # --- CONTROL DE APERTURA GLOBAL ---
+                # Si el combo está en 'Ver todo el álbum' y NO hay filtros de caja escritos, por defecto estará en False (cerrado/acoplado)
+                estado_predeterminado = False
+                if seleccion_combo != "Ver Todo el Álbum (735 Láminas)" or filtro_busqueda_activo:
+                    estado_predeterminado = True
+                
+                desplegar_todos = st.toggle("Desplegar todas las secciones 📖", value=estado_predeterminado)
+                
                 modo_click = "➕ Incrementar (+1)"
                 if st.session_state["modo_rol"] == "admin":
                     modo_click = st.radio("👇 Elige la acción para el toque de los cuadritos:", ["➕ Incrementar (+1)", "➖ Decrementar (-1)", "🛑 No la tengo (0)"], horizontal=True)
@@ -313,7 +346,6 @@ else:
                             cant_actual = int(lam['cantidad'])
                             desc_l = str(lam['descripcion'])
                             
-                            # Construcción de etiqueta limpia con Salto de Línea y la Descripción
                             if cant_actual == 0:
                                 label_render = f"🛑 {id_l}\n{desc_l}"
                                 wrapper_class = "lamina-falta"
@@ -340,7 +372,8 @@ else:
                         
                         titulo_expander = f"⚽ {eq} — Gr. {gr} — Pág. {pag} ({tengo_seccion}/{total_seccion})"
                         
-                        with st.expander(titulo_expander, expanded=True):
+                        # Usamos la variable 'desplegar_todos' para controlar de forma inteligente el expander
+                        with st.expander(titulo_expander, expanded=desplegar_todos):
                             renderizar_cuadrícula_limpia(df_eq_sub)
                 else:
                     renderizar_cuadrícula_limpia(df_pagina_view)
