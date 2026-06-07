@@ -102,7 +102,7 @@ if "df_album" not in st.session_state:
         if registros_en_bd == 0:
             for _, fila in df_excel.iterrows():
                 cur.execute("""
-                    INSERT INTO album_2026 (id_lamina, equipo, group, descripcion, pagina, cantidad)
+                    INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
                     VALUES (%s, %s, %s, %s, %s, 0);
                 """, (int(fila['Laminas']), str(fila['Equipo']).strip(), str(fila['Grupo']).strip(), str(fila['Descripicion']).strip(), int(fila['Pagina'])))
             conn.commit()
@@ -193,14 +193,14 @@ def procesar_lista_intercambio_multi_transito(id_intercambio, texto_input, tipo_
     except:
         df_otros_t = pd.DataFrame(columns=['id_lamina', 'tipo'])
 
-    # Corrección hecha aquí: cambiamos 'en' por 'in'
     for _, trans in df_otros_t.iterrows():
         idx_t = df_album_actual[df_album_actual['id_lamina'] == int(trans['id_lamina'])].index
         if not idx_t.empty:
             if trans['tipo'] == 'entrar':
                 df_album_actual.loc[idx_t, 'cantidad'] += 1
             elif trans['tipo'] == 'salir':
-                df_album_actual.loc[idx_t, 'cantidad'] = max(0, df_album_actual.loc[idx_t, 'cantidad'] - 1)
+                # CORRECCIÓN 1: clip(lower=0) en vez de max()
+                df_album_actual.loc[idx_t, 'cantidad'] = (df_album_actual.loc[idx_t, 'cantidad'] - 1).clip(lower=0)
 
     for num in numeros_procesar:
         idx_lista = df_album_actual[df_album_actual['id_lamina'] == num].index
@@ -252,7 +252,7 @@ def aplicar_intercambio_especifico_bd(id_intercambio):
         cur.close()
         conn.close()
         st.session_state["df_album"] = df_local
-        st.success(f"¡Intercambio #{id_intercambio} aplicado de forma permanente en la nube!")
+        st.success(f"¡Intercambio #{id_intercambio} applied de forma permanente en la nube!")
     except Exception as e:
         st.error(f"Error al aplicar intercambio: {e}")
 
@@ -316,7 +316,8 @@ else:
             if trans['tipo'] == 'entrar':
                 df_proyectado.loc[idx_p, 'cantidad'] += 1
             elif trans['tipo'] == 'salir':
-                df_proyectado.loc[idx_p, 'cantidad'] = max(0, df_proyectado.loc[idx_p, 'cantidad'] - 1)
+                # CORRECCIÓN 2: clip(lower=0) en vez de max()
+                df_proyectado.loc[idx_p, 'cantidad'] = (df_proyectado.loc[idx_p, 'cantidad'] - 1).clip(lower=0)
 
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "🔄 Intercambios", "📊 Porcentajes de Llenado"])
 
