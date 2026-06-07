@@ -3,7 +3,6 @@ import psycopg2
 from urllib.parse import quote
 import pandas as pd
 import os
-import math
 
 # 1. CONFIGURACIÓN DE PÁGINA ESENCIAL
 st.set_page_config(page_title="Mi Álbum 2026", layout="centered")
@@ -13,30 +12,55 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🚀 CONTROL TOTAL DE PAGINACIÓN DESDE PYTHON (NUNCA MÁS SE BORRAN DATOS) ---
+# --- 🚀 CONTROL ABSOLUTO: CRUCE CON TU EXCEL REAL ---
 if "df_album" not in st.session_state:
-    conn = get_connection()
-    # Leemos la base de datos tal cual está, sin alterar tablas
-    df_base = pd.read_sql_query("SELECT id_lamina, equipo, grupo, descripcion, cantidad FROM album_2026;", conn)
-    conn.close()
+    archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     
-    # Forzar que el ID de la lámina sea un número entero para poder ordenar bien
-    df_base['id_lamina'] = df_base['id_lamina'].astype(int)
-    df_base['cantidad'] = df_base['cantidad'].astype(int)
+    try:
+        # 1. Leer el Excel real con tus páginas estrictas (Qatar=7, Bosnia=9, etc.)
+        df_excel = pd.read_excel(archivo_excel)
+        df_excel['Laminas'] = df_excel['Laminas'].astype(int)
+        df_excel['Pagina'] = df_excel['Pagina'].astype(int)
+        
+        # 2. Traer solo las cantidades acumuladas en Postgres (sin alterar tablas allá)
+        conn = get_connection()
+        df_bd = pd.read_sql_query("SELECT id_lamina, cantidad FROM album_2026;", conn)
+        conn.close()
+        df_bd['id_lamina'] = df_bd['id_lamina'].astype(int)
+        df_bd['cantidad'] = df_bd['cantidad'].astype(int)
+        
+    except Exception as e:
+        st.error(f"⚠️ Error al conectar o leer archivos: {e}")
+        # Copia de respaldo por seguridad si falla la lectura inicial de Postgres
+        df_bd = pd.DataFrame({'id_lamina': df_excel['Laminas'], 'cantidad': 0})
+
+    # 3. Mapeo y cruce exacto: La app manda sobre los textos y páginas del Excel
+    df_unido = pd.merge(
+        df_excel, df_bd, 
+        left_on='Laminas', right_on='id_lamina', 
+        how='left'
+    )
     
-    # 🎯 CORRECCIÓN DE PAGINACIÓN MANUAL Y MATEMÁTICA (15 láminas por página)
-    # Así garantizamos que Estadios (1-15) sea Pág 1, México (16-30) sea Pág 2...
-    df_base['pagina'] = df_base['id_lamina'].apply(lambda x: math.ceil(x / 15.0))
+    # Rellenar con 0 si alguna lámina no tenía registro de cantidad
+    df_unido['cantidad'] = df_unido['cantidad'].fillna(0).astype(int)
     
-    # Ordenamos de forma consecutiva estricta (1, 2, 3... 735)
-    df_base = df_base.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
+    # Renombrar y estructurar limpio para el resto de la app
+    df_unido = df_unido.rename(columns={
+        'Laminas': 'id_lamina',
+        'Equipo': 'equipo',
+        'Grupo': 'grupo',
+        'Descripicion': 'descripcion',
+        'Pagina': 'pagina'
+    })[['id_lamina', 'equipo', 'grupo', 'descripcion', 'pagina', 'cantidad']]
     
-    st.session_state["df_album"] = df_base
+    # Asegurar orden consecutivo estricto por el número de lámina
+    st.session_state["df_album"] = df_unido.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
-# --- CALLBACKS DE CONTEO ---
+
+# --- CALLBACKS DE CONTEO LOCAL ---
 def registrar_cambio_local(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
@@ -48,9 +72,9 @@ def registrar_cambio_local(id_lamina, operacion):
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
 
-# --- GUARDADO SEGURO ---
+# --- GUARDADO EN POSTGRES (Sin tumbar ni recrear tablas) ---
 def forzar_sincronizacion_bd():
-    with st.spinner("Sincronizando con Postgres..."):
+    with st.spinner("Sincronizando inventario con Postgres..."):
         try:
             conn = get_connection()
             cur = conn.cursor()
@@ -58,22 +82,31 @@ def forzar_sincronizacion_bd():
             for _, fila in st.session_state["df_album"].iterrows():
                 lote.append((int(fila['cantidad']), str(fila['id_lamina'])))
             
-            # Actualizamos de forma ultra segura usando el ID como texto por compatibilidad
-            cur.executemany(
-                "UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;",
-                lote
-            )
+            # Intenta actualizar el registro. Si por el DROP anterior se perdieron IDs, los inserta de nuevo de forma segura.
+            for cant, id_lam in lote:
+                cur.execute(
+                    "UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;",
+                    (cant, id_lam)
+                )
+                if cur.rowcount == 0:
+                    # Traemos los datos de la fila actual para reponer el registro borrado
+                    fila_completa = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == int(id_lam)].iloc[0]
+                    cur.execute(
+                        "INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad) VALUES (%s, %s, %s, %s, %s, %s);",
+                        (str(id_lam), str(fila_completa['equipo']), str(fila_completa['grupo']), str(fila_completa['descripcion']), int(fila_completa['pagina']), cant)
+                    )
+            
             conn.commit()
             cur.close()
             conn.close()
             st.session_state["tiene_cambios"] = False
-            st.toast("¡Cambios guardados con éxito! 🏆", icon="💾")
+            st.toast("¡Álbum guardado con éxito! 🏆", icon="💾")
         except Exception as e:
-            st.error(f"Error al sincronizar: {e}")
+            st.error(f"Error al guardar datos: {e}")
 
 
 # ==========================================================
-# 🔐 GESTIÓN DE SEGURIDAD
+# 🔐 SEGURIDAD Y ACCESO
 # ==========================================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -160,24 +193,23 @@ else:
         link_t = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
-
-    # PESTAÑA 2: NAVEGADOR
+    # PESTAÑA 2: NAVEGADOR (Páginas exactas de tu archivo Excel)
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
         else:
-            st.success("🔑 Modo Administrador Activo.")
+            st.success("🔑 Modo Administrator Activo.")
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
         if st.session_state["modo_rol"] == "admin":
             if st.session_state["tiene_cambios"]:
                 st.warning("⚠️ Tienes modificaciones locales sin guardar en la nube.")
-                if st.button("💾 FORZAR SINCRONIZACIÓN CON EL SERVIDOR", type="primary", use_container_width=True):
+                if st.button("💾 GUARDAR CAMBIOS EN LA NUBE", type="primary", use_container_width=True):
                     forzar_sincronizacion_bd()
                     st.rerun()
             else:
-                st.info("✅ Datos locales sincronizados con el servidor remoto.")
+                st.info("✅ Todos los datos están guardados y sincronizados.")
         
         df_nav = st.session_state["df_album"]
         
@@ -197,6 +229,7 @@ else:
                 paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())]
                 buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
 
+        # Combo box ordenado fielmente por el número de página real de tu Excel
         lista_paginas_nav = df_nav.groupby(['pagina', 'equipo', 'grupo']).size().reset_index().sort_values(by='pagina')
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"] + [f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})" for _, r in lista_paginas_nav.iterrows()]
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
