@@ -81,8 +81,8 @@ if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
 
-# --- CALLBACKS DE CONTEO LOCAL ---
-def registrar_cambio_local(id_lamina, operacion):
+# --- CALLBACKS DE CONTEO LOCAL (SIN REFRESH - RESPUESTA INMEDIATA EN MÓVIL) ---
+def registrar_cambio_local_instantaneo(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
         actual = int(st.session_state["df_album"].loc[idx, 'cantidad'].values[0])
@@ -125,7 +125,7 @@ def forzar_sincronizacion_bd():
 
 
 # ==========================================================
-# 🔐 SEGURIDAD Y ACCESO
+# 🔐 SEGURIDAD Y ACCESO (CONTRASEÑA ACTUALIZADA)
 # ==========================================================
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -142,7 +142,8 @@ if not st.session_state["autenticado"]:
         user_input = st.text_input("Usuario:", value="")
         pass_input = st.text_input("Contraseña:", type="password", value="")
         if st.button("🔓 Iniciar Sesión"):
-            if user_input == "admin" and pass_input == "1234":
+            # Ajustada a tu nueva contraseña amigable y segura
+            if user_input == "admin" and pass_input == "Jlrm1987*":
                 st.session_state["autenticado"] = True
                 st.session_state["modo_rol"] = "admin"
                 st.rerun()
@@ -295,75 +296,85 @@ else:
         if df_pagina_view.empty:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
-            # ==========================================
-            # OPCIÓN 1: VISTA INDIVIDUAL (MÓVIL)
-            # ==========================================
+            # ==========================================================
+            # OPCIÓN 1: VISTA MÓVIL (TARJETAS COMPACTAS AUTOMÁTICAS)
+            # ==========================================================
             if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
+                
                 for _, lam in df_pagina_view.iterrows():
                     id_l = int(lam['id_lamina'])
                     cant_actual = lam['cantidad']
                     
-                    if st.session_state["modo_rol"] == "admin":
-                        c_info, c_estado, c_controles = st.columns([2, 1.2, 1])
-                    else:
-                        c_info, c_estado = st.columns([2.5, 1.5])
-                    
-                    # Lógica para dejar la descripción vacía si es Estadio
+                    # Regla lógica: Descripción vacía si pertenece al grupo/equipo Estadios
                     desc_render = "" if str(lam['equipo']).lower() == "estadios" else lam['descripcion']
                     
-                    with c_info:
-                        st.markdown(f"**No. {id_l}** - {desc_render}\n\n<p style='font-size: 12px; margin-top: -5px; opacity: 0.85;'>{lam['equipo']} • Grupo {lam['grupo']} • Pág. {lam['pagina']}</p>", unsafe_allow_html=True)
-                        
-                    with c_estado:
-                        if cant_actual == 0:
-                            st.error("Falta 🚨")
-                        elif cant_actual == 1:
-                            st.success("Tengo ✅")
-                        else:
-                            st.warning(f"Repetidas: {cant_actual-1}")
-                            
+                    # Colores dinámicos según el estado del inventario
+                    if cant_actual == 0:
+                        border_color = "#E74C3C"  # Rojo Falta
+                        bg_card = "#FDEDEC"
+                        status_ico = "🚨"
+                    elif cant_actual == 1:
+                        border_color = "#2ECC71"  # Verde Tengo
+                        bg_card = "#E9F7EF"
+                        status_ico = "✅"
+                    else:
+                        border_color = "#F39C12"  # Naranja Repetida
+                        bg_card = "#FEF5E7"
+                        status_ico = f"🔁 (x{cant_actual-1})"
+
+                    # Renderizado HTML limpio y estilizado
+                    st.markdown(f"""
+                    <div style='background-color: {bg_card}; border: 2px solid {border_color}; border-radius: 8px; padding: 6px; margin-bottom: 4px; position: relative;'>
+                        <div style='position: absolute; top: 4px; right: 8px; font-size: 10px; color: #555; font-weight: bold;'>Pag. {lam['pagina']}</div>
+                        <div style='font-size: 14px; font-weight: bold;'>No. {id_l} - {status_ico}</div>
+                        <div style='font-size: 12px; font-weight: bold; margin-top: -2px;'>{lam['equipo']}</div>
+                        <div style='font-size: 11px; color: #444; margin-top: 1px;'>{desc_render}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Controles ultra-ajustados en horizontal sin recarga de pantalla
                     if st.session_state["modo_rol"] == "admin":
-                        with c_controles:
-                            btn_col1, btn_col2 = st.columns(2)
-                            btn_col1.button("➕", key=f"add_{id_l}", on_click=registrar_cambio_local, args=(id_l, "sumar"))
-                            btn_col2.button("➖", key=f"sub_{id_l}", on_click=registrar_cambio_local, args=(id_l, "restar"))
+                        c_control1, c_num, c_control2, c_vacio = st.columns([0.8, 0.8, 0.8, 4])
+                        with c_control1:
+                            st.button("➕", key=f"add_mob_{id_l}", on_click=registrar_cambio_local_instantaneo, args=(id_l, "sumar"))
+                        with c_num:
+                            st.markdown(f"<div style='text-align: center; font-size: 15px; font-weight: bold; margin-top: 4px;'>{cant_actual}</div>", unsafe_allow_html=True)
+                        with c_control2:
+                            st.button("➖", key=f"sub_mob_{id_l}", on_click=registrar_cambio_local_instantaneo, args=(id_l, "restar"))
                                 
-                    st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
+                    st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #eaeaea;'>", unsafe_allow_html=True)
             
-            # ==========================================
-            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (PC)
-            # ==========================================
+            # ==========================================================
+            # OPCIÓN 2: VISTA TABLA COMPACTA (PC CON COLUMNA PAGINA)
+            # ==========================================================
             else:
                 st.write("---")
                 st.markdown("<p style='font-size: 13px; color: #555;'>💡 <b>Tip de velocidad:</b> Modifica directamente los valores en la columna <b>'Cantidad'</b>.</p>", unsafe_allow_html=True)
                 
-                # 1. Filtramos y limpiamos el DataFrame temporal para mostrar SOLO las 3 columnas solicitadas
-                df_ultra_reducido = df_pagina_view[['id_lamina', 'equipo', 'cantidad']].copy()
+                # Preparamos el set de datos reducidos agregando 'pagina'
+                df_ultra_reducido_pc = df_pagina_view[['id_lamina', 'equipo', 'pagina', 'cantidad']].copy()
+                df_ultra_reducido_pc = df_ultra_reducido_pc.rename(columns={'id_lamina': 'No.', 'pagina': 'Pag.'})
                 
-                # Cambiamos el nombre técnico a "No." como pediste
-                df_ultra_reducido = df_ultra_reducido.rename(columns={'id_lamina': 'No.'})
-                
-                # 2. Aplicamos la regla para vaciar la descripción si aplica en el dataframe (en este caso solo mostramos equipo, si hubiera descripción para estadios iría vacía)
-                # Como quitamos descripción y grupo por completo, la tabla queda diminuta.
-                
+                # Configuración de renderizado de columnas fijas y tamaños estrictos
                 config_columnas_pc = {
                     "No.": st.column_config.NumberColumn("No.", disabled=True, format="%d", pinned=True, width=65),
                     "equipo": st.column_config.TextColumn("⚽ Equipo", disabled=True, pinned=True, width=150),
-                    "cantidad": st.column_config.NumberColumn("🔢 Cantidad", min_value=0, max_value=99, step=1, required=True, width=95),
+                    "Pag.": st.column_config.NumberColumn("Pag.", disabled=True, format="%d", pinned=True, width=60),
+                    "cantidad": st.column_config.NumberColumn("🔢 Cantidad", min_value=0, max_value=99, step=1, required=True, width=90),
                 }
 
                 if st.session_state["modo_rol"] == "admin":
                     tabla_editada = st.data_editor(
-                        df_ultra_reducido,
+                        df_ultra_reducido_pc,
                         column_config=config_columnas_pc,
                         hide_index=True,
                         use_container_width=True,
                         key="editor_masivo_pc"
                     )
                     
-                    # Sincronización con el Session State usando la columna "No."
-                    if not tabla_editada.equals(df_ultra_reducido):
+                    # Sincronización bidireccional al modificar celdas
+                    if not tabla_editada.equals(df_ultra_reducido_pc):
                         for idx, fila in tabla_editada.iterrows():
                             id_l = int(fila['No.'])
                             nueva_cant = int(fila['cantidad'])
@@ -377,7 +388,7 @@ else:
                         st.rerun()
                 else:
                     st.dataframe(
-                        df_ultra_reducido,
+                        df_ultra_reducido_pc,
                         column_config=config_columnas_pc,
                         hide_index=True,
                         use_container_width=True
