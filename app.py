@@ -294,7 +294,7 @@ else:
             if "df_album" in st.session_state: del st.session_state["df_album"]
             st.rerun()
 
-    menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
+    menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "🔄 Intercambios", "📊 Porcentajes de Llenado"])
 
     # PESTAÑA 1: DASHBOARD (GENERAL)
     with menu_principal[0]:
@@ -335,7 +335,6 @@ else:
         str_tengo_completo = ", ".join([str(x) for x in sorted(tengo_lista)]) if tengo_lista else "Ninguna lámina registrada aún."
         txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026*\n\n📋 *Lista:* {str_tengo_completo}"
 
-        # Tres botones originales en expanders utilizando el sistema nativo de copiado integrado de st.code
         with st.expander("🚨 Ver y Copiar Lista de Faltantes", expanded=False):
             st.code(txt_faltan, language="text")
             
@@ -354,71 +353,13 @@ else:
         url_tengo = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
         st.markdown(f'<a href="{url_tengo}" target="_blank" style="text-decoration: none;"><button style="background-color: #2ECC71; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">📲 Compartir Lo Que Tengo por WhatsApp</button></a>', unsafe_allow_html=True)
 
-        # --- MODULO DE INTERCAMBIO ---
-        if st.session_state["modo_rol"] == "admin":
-            st.write("---")
-            with st.expander("🔁 Módulo de Intercambio (Gestión de Tránsitos Enumerados)", expanded=False):
-                id_actual_intercambio = obtener_siguiente_id_intercambio()
-                st.markdown(f"<div style='background-color:#ebf5fb; padding:8px; border-radius:6px; margin-bottom:12px; text-align:center;'><b>📝 Preparando Nuevo Bloque: Intercambio #{id_actual_intercambio}</b></div>", unsafe_allow_html=True)
-                
-                col_int1, col_int2 = st.columns(2)
-                with col_int1:
-                    st.markdown("<b style='color:#2ECC71;'>📥 INGRESAR</b>", unsafe_allow_html=True)
-                    txt_entrar = st.text_area("Números a entrar:", value="", placeholder="Ej: 5, 12", key="area_entrar_m", height=100)
-                    if st.button("📥 Registrar Entrada", use_container_width=True):
-                        ok, bad = procesar_lista_intercambio_multi_transito(id_actual_intercambio, txt_entrar, "entrar")
-                        if ok: st.success(f"En Tránsito #{id_actual_intercambio}: {', '.join(map(str, ok))}")
-                        if bad:
-                            for n, m in bad: st.write(f"<span style='font-size:12px; color:#E74C3C;'>• No. {n}: {m}</span>", unsafe_allow_html=True)
-                        if ok or bad: st.rerun()
-                
-                with col_int2:
-                    st.markdown("<b style='color:#F39C12;'>📤 SACAR</b>", unsafe_allow_html=True)
-                    txt_sacar = st.text_area("Números a sacar:", value="", placeholder="Ej: 6, 17", key="area_sacar_m", height=100)
-                    if st.button("📤 Registrar Salida", use_container_width=True):
-                        ok, bad = procesar_lista_intercambio_multi_transito(id_actual_intercambio, txt_sacar, "salir")
-                        if ok: st.success(f"En Tránsito #{id_actual_intercambio}: {', '.join(map(str, ok))}")
-                        if bad:
-                            for n, m in bad: st.write(f"<span style='font-size:12px; color:#E74C3C;'>• No. {n}: {m}</span>", unsafe_allow_html=True)
-                        if ok or bad: st.rerun()
-
-                try:
-                    conn = get_connection()
-                    df_pendientes = pd.read_sql_query("SELECT id_intercambio, id_lamina, tipo FROM album_transito ORDER BY id_intercambio, id_lamina;", conn)
-                    conn.close()
-                except:
-                    df_pendientes = pd.DataFrame()
-
-                if not df_pendientes.empty:
-                    st.write("---")
-                    st.markdown("##### ⏳ Intercambios Abiertos Pendientes:")
-                    for id_int, sub_df_int in df_pendientes.groupby('id_intercambio'):
-                        list_entran = sub_df_int[sub_df_int['tipo'] == 'entrar']['id_lamina'].tolist()
-                        list_salen = sub_df_int[sub_df_int['tipo'] == 'salir']['id_lamina'].tolist()
-                        
-                        st.markdown(f"""
-                        <div style='background-color:#f9f9f9; padding:10px; border-radius:6px; border-left:4px solid #34495e; margin-bottom:8px;'>
-                            <b>🤝 INTERCAMBIO #{id_int}</b><br>
-                            <span style='color:#2ecc71;'>📥 Entran:</span> {", ".join(map(str, sorted(list_entran))) if list_entran else "Ninguna"}<br>
-                            <span style='color:#e67e22;'>📤 Salen:</span> {", ".join(map(str, sorted(list_salen))) if list_salen else "Ninguna"}
-                        </div>
-                        """, unsafe_allow_html=True)
-                        col_acc1, col_acc2 = st.columns(2)
-                        with col_acc1:
-                            if st.button(f"✅ Aplicar Intercambio #{id_int}", key=f"ok_{id_int}", use_container_width=True):
-                                aplicar_intercambio_especifico_bd(id_int)
-                                st.rerun()
-                        with col_acc2:
-                            if st.button(f"❌ Cancelar Intercambio #{id_int}", key=f"del_{id_int}", use_container_width=True):
-                                eliminar_intercambio_especifico_bd(id_int)
-                                st.rerun()
 
     # PESTAÑA 2: NAVEGADOR DE LÁMINAS
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
         else:
-            st.success("🔑 Modo Administrador Activo. Sincronización en tiempo real con la nube ⚡")
+            st.success("🔑 Modo Administrator Activo. Sincronización en tiempo real con la nube ⚡")
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         modo_vista = st.radio("Selecciona la interfaz de carga:", ["Opcion 1: Vista Individual 📱", "Opcion 2: Vista Tabla (PC masiva) 💻"], horizontal=True)
@@ -434,16 +375,18 @@ else:
                 
             col_b3, col_b4 = st.columns(2)
             with col_b3: 
-                eq_a = st.selectbox("⚽ Seleccionar Equipo A:", ["Ninguno"] + lista_todos_equipos, index=0)
+                # SE MANTIENE "Ninguno" EN INDEX 0 Y SE AGREGA "Todos" EN LA LISTA ADICIONAL
+                eq_a = st.selectbox("⚽ Seleccionar Equipo A:", ["Ninguno", "Todos"] + lista_todos_equipos, index=0)
             with col_b4: 
-                eq_b = st.selectbox("⚽ Seleccionar Equipo B:", ["Ninguno"] + lista_todos_equipos, index=0)
+                # SE MANTIENE "Ninguno" EN INDEX 0 Y SE AGREGA "Todos" EN LA LISTA ADICIONAL
+                eq_b = st.selectbox("⚽ Seleccionar Equipo B:", ["Ninguno", "Todos"] + lista_todos_equipos, index=0)
             
-            if eq_a != "Ninguno" or eq_b != "Ninguno":
+            if (eq_a != "Ninguno" and eq_a != "Todos") or (eq_b != "Ninguno" and eq_b != "Todos"):
                 st.markdown("<div style='background-color:#f1f2f6; padding:8px; border-radius:6px; margin-top:5px; font-size:12px;'>", unsafe_allow_html=True)
-                if eq_a != "Ninguno":
+                if eq_a != "Ninguno" and eq_a != "Todos":
                     inf_a = df_nav[df_nav['equipo'] == eq_a].iloc[0]
                     st.markdown(f"📋 **Equipo A ({eq_a}):** Grupo {inf_a['grupo']} — Ubicado en la **Página {inf_a['pagina']}**", unsafe_allow_html=True)
-                if eq_b != "Ninguno":
+                if eq_b != "Ninguno" and eq_b != "Todos":
                     inf_b = df_nav[df_nav['equipo'] == eq_b].iloc[0]
                     st.markdown(f"📋 **Equipo B ({eq_b}):** Grupo {inf_b['grupo']} — Ubicado en la **Página {inf_b['pagina']}**", unsafe_allow_html=True)
                 st.markdown("</div>", unsafe_allow_html=True)
@@ -473,12 +416,25 @@ else:
             df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.contains('Escudo|Especial', case=False, na=False)]
             filtro_busqueda_activo = True
             
+        # LÓGICA DE FILTRADO CORREGIDA: SÓLO COMPRUEBA SI NO ES "Ninguno" NI "Todos"
         if eq_a != "Ninguno" or eq_b != "Ninguno":
             equipos_filtro = []
-            if eq_a != "Ninguno": equipos_filtro.append(eq_a)
-            if eq_b != "Ninguno": equipos_filtro.append(eq_b)
-            df_pagina_view = df_pagina_view[df_pagina_view['equipo'].isin(equipos_filtro)]
-            filtro_busqueda_activo = True
+            
+            # Si se elige "Todos" en alguno, significa que queremos la lista completa de países de ese selector
+            if eq_a == "Todos" or eq_b == "Todos":
+                if eq_a != "Ninguno" and eq_a != "Todos": equipos_filtro.append(eq_a)
+                if eq_b != "Ninguno" and eq_b != "Todos": equipos_filtro.append(eq_b)
+                # Si ambos están en "Todos" o uno está en "Todos" y el otro en "Ninguno", pasan todos los equipos
+                if len(equipos_filtro) > 0:
+                    df_pagina_view = df_pagina_view[df_pagina_view['equipo'].isin(equipos_filtro)]
+                filtro_busqueda_activo = True
+            else:
+                # Caso de filtrado cruzado normal por marcas/países específicos
+                if eq_a != "Ninguno": equipos_filtro.append(eq_a)
+                if eq_b != "Ninguno": equipos_filtro.append(eq_b)
+                if equipos_filtro:
+                    df_pagina_view = df_pagina_view[df_pagina_view['equipo'].isin(equipos_filtro)]
+                filtro_busqueda_activo = True
 
         if filtro_inventario == "Faltantes": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
         elif filtro_inventario == "Tengo": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 0]
@@ -528,8 +484,11 @@ else:
                                         st.button(label_render, key=f"btn_view_{id_l}", disabled=True, use_container_width=True)
                                     st.html("</div>")
 
-                # --- 🔀 CORRECCIÓN AQUÍ: COMPORTAMIENTO DE FILTRADO CRUZADO ---
-                if seleccion_combo == "Ver Todo el Álbum (735 Láminas)" and eq_a == "Ninguno" and eq_b == "Ninguno":
+                # COMPORTAMIENTO DE FILTRADO CORREGIDO: Si hay algún filtro activo que no sea "Todos" o "Ninguno", se dibuja directo en la raíz.
+                # Si ambos están en "Ninguno" o "Todos", conserva la vista organizada por expanders de equipos.
+                es_filtro_puro_equipos = (eq_a != "Ninguno" and eq_a != "Todos") or (eq_b != "Ninguno" and eq_b != "Todos")
+                
+                if seleccion_combo == "Ver Todo el Álbum (735 Láminas)" and not es_filtro_puro_equipos:
                     for (pag, eq, gr), df_eq_sub in df_pagina_view.groupby(['pagina', 'equipo', 'grupo'], sort=False):
                         total_seccion = len(df_eq_sub)
                         tengo_seccion = df_eq_sub[df_eq_sub['cantidad'] > 0]['id_lamina'].count()
@@ -537,7 +496,6 @@ else:
                         with st.expander(titulo_expander, expanded=desplegar_todos):
                             renderizar_cuadrícula_limpia(df_eq_sub)
                 else:
-                    # Si se seleccionó Equipo A o Equipo B, se saltan los expanders y pinta las láminas directamente
                     renderizar_cuadrícula_limpia(df_pagina_view)
             else:
                 st.write("---")
@@ -569,8 +527,71 @@ else:
                 else:
                     st.dataframe(df_pc_final.drop(columns=['Cantidad']), column_config=config_columnas_pc, hide_index=True, use_container_width=True)
 
-    # PESTAÑA 3: PORCENTAJES DE LLENADO
+
+    # PESTAÑA 3: PESTAÑA DE INTERCAMBIOS INDEPENDIENTE
     with menu_principal[2]:
+        st.markdown("<h4>🔄 Módulo de Intercambio (Tránsitos Enumerados)</h4>", unsafe_allow_html=True)
+        if st.session_state["modo_rol"] != "admin":
+            st.info("👁️ Esta sección solo está disponible para administración.")
+        else:
+            id_actual_intercambio = obtener_siguiente_id_intercambio()
+            st.markdown(f"<div style='background-color:#ebf5fb; padding:8px; border-radius:6px; margin-bottom:12px; text-align:center;'><b>📝 Preparando Nuevo Bloque: Intercambio #{id_actual_intercambio}</b></div>", unsafe_allow_html=True)
+            
+            col_int1, col_int2 = st.columns(2)
+            with col_int1:
+                st.markdown("<b style='color:#2ECC71;'>📥 INGRESAR</b>", unsafe_allow_html=True)
+                txt_entrar = st.text_area("Números a entrar:", value="", placeholder="Ej: 5, 12", key="area_entrar_m", height=100)
+                if st.button("📥 Registrar Entrada", use_container_width=True):
+                    ok, bad = procesar_lista_intercambio_multi_transito(id_actual_intercambio, txt_entrar, "entrar")
+                    if ok: st.success(f"En Tránsito #{id_actual_intercambio}: {', '.join(map(str, ok))}")
+                    if bad:
+                        for n, m in bad: st.write(f"<span style='font-size:12px; color:#E74C3C;'>• No. {n}: {m}</span>", unsafe_allow_html=True)
+                    if ok or bad: st.rerun()
+            
+            with col_int2:
+                st.markdown("<b style='color:#F39C12;'>📤 SACAR</b>", unsafe_allow_html=True)
+                txt_sacar = st.text_area("Números a sacar:", value="", placeholder="Ej: 6, 17", key="area_sacar_m", height=100)
+                if st.button("📤 Registrar Salida", use_container_width=True):
+                    ok, bad = procesar_lista_intercambio_multi_transito(id_actual_intercambio, txt_sacar, "salir")
+                    if ok: st.success(f"En Tránsito #{id_actual_intercambio}: {', '.join(map(str, ok))}")
+                    if bad:
+                        for n, m in bad: st.write(f"<span style='font-size:12px; color:#E74C3C;'>• No. {n}: {m}</span>", unsafe_allow_html=True)
+                    if ok or bad: st.rerun()
+
+            try:
+                conn = get_connection()
+                df_pendientes = pd.read_sql_query("SELECT id_intercambio, id_lamina, tipo FROM album_transito ORDER BY id_intercambio, id_lamina;", conn)
+                conn.close()
+            except:
+                df_pendientes = pd.DataFrame()
+
+            if not df_pendientes.empty:
+                st.write("---")
+                st.markdown("##### ⏳ Intercambios Abiertos Pendientes:")
+                for id_int, sub_df_int in df_pendientes.groupby('id_intercambio'):
+                    list_entran = sub_df_int[sub_df_int['tipo'] == 'entrar']['id_lamina'].tolist()
+                    list_salen = sub_df_int[sub_df_int['tipo'] == 'salir']['id_lamina'].tolist()
+                    
+                    st.markdown(f"""
+                    <div style='background-color:#f9f9f9; padding:10px; border-radius:6px; border-left:4px solid #34495e; margin-bottom:8px;'>
+                        <b>🤝 INTERCAMBIO #{id_int}</b><br>
+                        <span style='color:#2ecc71;'>📥 Entran:</span> {", ".join(map(str, sorted(list_entran))) if list_entran else "Ninguna"}<br>
+                        <span style='color:#e67e22;'>📤 Salen:</span> {", ".join(map(str, sorted(list_salen))) if list_salen else "Ninguna"}
+                    </div>
+                    """, unsafe_allow_html=True)
+                    col_acc1, col_acc2 = st.columns(2)
+                    with col_acc1:
+                        if st.button(f"✅ Aplicar Intercambio #{id_int}", key=f"ok_{id_int}", use_container_width=True):
+                            aplicar_intercambio_especifico_bd(id_int)
+                            st.rerun()
+                    with col_acc2:
+                        if st.button(f"❌ Cancelar Intercambio #{id_int}", key=f"del_{id_int}", use_container_width=True):
+                            eliminar_intercambio_especifico_bd(id_int)
+                            st.rerun()
+
+
+    # PESTAÑA 4: PORCENTAJES DE LLENADO
+    with menu_principal[3]:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
         sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
         df_stats = st.session_state["df_album"].copy()
