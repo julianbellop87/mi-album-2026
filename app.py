@@ -184,8 +184,9 @@ def procesar_lista_intercambio_multi_transito(id_intercambio, texto_input, tipo_
     
     exitosos = []
     fallidos = []
-    df_album_actual = st.session_state["df_album"]
     
+    # IMPORTANTE: Para validar el tránsito nuevo, miramos la proyección de lo que ya está acumulado en tránsito
+    df_album_actual = st.session_state["df_album"].copy()
     try:
         conn = get_connection()
         df_otros_t = pd.read_sql_query("SELECT id_lamina, tipo FROM album_transito;", conn)
@@ -193,31 +194,37 @@ def procesar_lista_intercambio_multi_transito(id_intercambio, texto_input, tipo_
     except:
         df_otros_t = pd.DataFrame(columns=['id_lamina', 'tipo'])
 
+    # Aplicamos transito actual en memoria para validar correctamente
+    for _, trans en df_otros_t.iterrows():
+        idx_t = df_album_actual[df_album_actual['id_lamina'] == int(trans['id_lamina'])].index
+        if not idx_t.empty:
+            if trans['tipo'] == 'entrar':
+                df_album_actual.loc[idx_t, 'cantidad'] += 1
+            elif trans['tipo'] == 'salir':
+                df_album_actual.loc[idx_t, 'cantidad'] = max(0, df_album_actual.loc[idx_t, 'cantidad'] - 1)
+
     for num in numeros_procesar:
         idx_lista = df_album_actual[df_album_actual['id_lamina'] == num].index
         if idx_lista.empty:
             fallidos.append((num, "No existe en el álbum"))
             continue
             
-        cant_real = int(df_album_actual.loc[idx_lista[0], 'cantidad'])
-        ya_en_entrada = len(df_otros_t[(df_otros_t['id_lamina'] == num) & (df_otros_t['tipo'] == 'entrar')])
-        ya_en_salida = len(df_otros_t[(df_otros_t['id_lamina'] == num) & (df_otros_t['tipo'] == 'salir')])
+        cant_proyectada = int(df_album_actual.loc[idx_lista[0], 'cantidad'])
         
         if tipo_operacion == "entrar":
-            if cant_real == 0 and ya_en_entrada == 0:
+            if cant_proyectada == 0:
                 exitosos.append(num)
+                df_album_actual.loc[idx_lista[0], 'cantidad'] += 1  # Simular acumulado para el mismo bloque de texto
             else:
-                motivo = f"Ya la tienes (x{cant_real})" if cant_real > 0 else "Ya está en otro tránsito de entrada"
-                fallidos.append((num, motivo))
+                fallidos.append((num, f"Ya la tendrías con los tránsitos actuales (x{cant_proyectada})"))
                 
         elif tipo_operacion == "salir":
-            disponibles_ahora = (cant_real - 1) - ya_en_salida
-            if cant_real > 1 and disponibles_ahora > 0:
+            if cant_proyectada > 1:
                 exitosos.append(num)
+                df_album_actual.loc[idx_lista[0], 'cantidad'] -= 1  # Simular acumulado para el mismo bloque de texto
             else:
-                if cant_real == 0: motivo = "No la tienes"
-                elif cant_real == 1: motivo = "Solo tienes 1 (Pegada)"
-                else: motivo = "Ya comprometida en otros tránsitos"
+                if cant_proyectada == 0: motivo = "No la tienes en tu inventario proyectado"
+                elif cant_proyectada == 1: motivo = "Te quedarías sin la pegada (quedaría en 0)"
                 fallidos.append((num, motivo))
                 
     if exitosos:
@@ -246,7 +253,7 @@ def aplicar_intercambio_especifico_bd(id_intercambio):
         cur.close()
         conn.close()
         st.session_state["df_album"] = df_local
-        st.success(f"¡Intercambio #{id_intercambio} aplicado con éxito!")
+        st.success(f"¡Intercambio #{id_intercambio} aplicado de forma permanente en la nube!")
     except Exception as e:
         st.error(f"Error al aplicar intercambio: {e}")
 
@@ -294,11 +301,29 @@ else:
             if "df_album" in st.session_state: del st.session_state["df_album"]
             st.rerun()
 
+    # --- 🔄 OBTENCIÓN DE TRÁNSITOS PARA PROYECCIÓN EN MEMORIA ---
+    try:
+        conn = get_connection()
+        df_transito_global = pd.read_sql_query("SELECT id_lamina, tipo FROM album_transito;", conn)
+        conn.close()
+    except:
+        df_transito_global = pd.DataFrame(columns=['id_lamina', 'tipo'])
+
+    # CREAR EL DATAFRAME PROYECTADO (Asumiendo tránsitos como aceptados para General y Navegación)
+    df_proyectado = st.session_state["df_album"].copy()
+    for _, trans in df_transito_global.iterrows():
+        idx_p = df_proyectado[df_proyectado['id_lamina'] == int(trans['id_lamina'])].index
+        if not idx_p.empty:
+            if trans['tipo'] == 'entrar':
+                df_proyectado.loc[idx_p, 'cantidad'] += 1
+            elif trans['tipo'] == 'salir':
+                df_proyectado.loc[idx_p, 'cantidad'] = max(0, df_proyectado.loc[idx_p, 'cantidad'] - 1)
+
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "🔄 Intercambios", "📊 Porcentajes de Llenado"])
 
-    # PESTAÑA 1: DASHBOARD (GENERAL)
+    # PESTAÑA 1: DASHBOARD (GENERAL) -> USA EL INVENTARIO PROYECTADO
     with menu_principal[0]:
-        df_gen = st.session_state["df_album"].copy()
+        df_gen = df_proyectado.copy()
         df_gen['tiene'] = df_gen['cantidad'].apply(lambda x: 1 if x > 0 else 0)
         df_gen['es_repetida'] = df_gen['cantidad'].apply(lambda x: x - 1 if x > 1 else 0)
 
@@ -312,7 +337,7 @@ else:
         total_repes = df_gen['es_repetida'].sum()
         progreso_gen = (total_tengo / total_laminas) * 100 if total_laminas > 0 else 0
 
-        st.markdown(f"<p style='text-align: center; margin-bottom: 5px; font-weight: bold; font-size: 15px;'>📊 Progreso General: {progreso_gen:.1f}% ({total_tengo} / {total_laminas} láminas)</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: center; margin-bottom: 5px; font-weight: bold; font-size: 15px;'>📊 Progreso Proyectado: {progreso_gen:.1f}% ({total_tengo} / {total_laminas} láminas)</p>", unsafe_allow_html=True)
         st.progress(progreso_gen / 100)
         
         st.markdown(f"""
@@ -323,7 +348,6 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
-        # PREPARACIÓN DE CADENAS DE TEXTO PARA LOS BOTONES DE ENVIAR
         str_faltan_completo = ", ".join([str(x) for x in sorted(faltan_lista)]) if faltan_lista else "¡Ninguna! Álbum lleno 🥳"
         txt_faltan = f"*🚨 MIS FALTANTES - ÁLBUM 2026*\n\nProgreso: {progreso_gen:.1f}%\n\n📋 *Lista:* {str_faltan_completo}"
         
@@ -334,7 +358,6 @@ else:
         str_tengo_completo = ", ".join([str(x) for x in sorted(tengo_lista)]) if tengo_lista else "Ninguna lámina registrada aún."
         txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026*\n\n📋 *Lista:* {str_tengo_completo}"
 
-        # BOTONES DIRECTOS A WHATSAPP (SE REDUJERON LOS EXPANDERS ANTERIORES)
         url_faltan = f"https://api.whatsapp.com/send?text={quote(txt_faltan)}"
         st.markdown(f'<a href="{url_faltan}" target="_blank" style="text-decoration: none;"><button style="background-color: #E74C3C; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">📲 Compartir Faltantes por WhatsApp</button></a>', unsafe_allow_html=True)
 
@@ -345,16 +368,19 @@ else:
         st.markdown(f'<a href="{url_tengo}" target="_blank" style="text-decoration: none;"><button style="background-color: #2ECC71; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">📲 Compartir Lo Que Tengo por WhatsApp</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR DE LÁMINAS
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS -> USA EL INVENTARIO PROYECTADO
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
         else:
             st.success("🔑 Modo Administrator Activo. Sincronización en tiempo real con la nube ⚡")
 
-        st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
+        st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo (Proyección Activa)</h4>", unsafe_allow_html=True)
+        if not df_transito_global.empty:
+            st.caption("💡 Nota: Los cuadritos reflejan los tránsitos abiertos como si ya estuvieran aceptados.")
+
         modo_vista = st.radio("Selecciona la interfaz de carga:", ["Opcion 1: Vista Individual 📱", "Opcion 2: Vista Tabla (PC masiva) 💻"], horizontal=True)
-        df_nav = st.session_state["df_album"]
+        df_nav = df_proyectado.copy()
         
         with st.expander("🔍 Buscadores Especializados", expanded=True):
             col_b1, col_b2 = st.columns([1.5, 2])
@@ -463,6 +489,7 @@ else:
                                 with st.container(key=f"wrap_{id_l}"):
                                     st.html(f"<div class='{wrapper_class}'>")
                                     if st.session_state["modo_rol"] == "admin":
+                                        # Al hacer clic, modificamos el inventario real (la base)
                                         st.button(label_render, key=f"btn_{id_l}", on_click=ejecutar_accion_lamina, args=(id_l, modo_click), use_container_width=True)
                                     else:
                                         st.button(label_render, key=f"btn_view_{id_l}", disabled=True, use_container_width=True)
@@ -572,11 +599,11 @@ else:
                             st.rerun()
 
 
-    # PESTAÑA 4: PORCENTAJES DE LLENADO
+    # PESTAÑA 4: PORCENTAJES DE LLENADO -> TAMBIÉN SE BASAN EN LO PROYECTADO
     with menu_principal[3]:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
         sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
-        df_stats = st.session_state["df_album"].copy()
+        df_stats = df_proyectado.copy()
         df_stats['tiene'] = df_stats['cantidad'].apply(lambda x: 1 if x > 0 else 0)
         
         with sub_tabs[0]:
