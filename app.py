@@ -1,4 +1,4 @@
-mport streamlit as st
+import streamlit as st
 import psycopg2
 from urllib.parse import quote
 import pandas as pd
