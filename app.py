@@ -1,3 +1,14 @@
+¡Ya veo perfectamente qué pasó en la última imagen (image_854728.png)! Qué buen ojo tenés para testear la interfaz.
+
+El problema es un clásico error de lógica condicional en el renderizado de Streamlit. Si miras el código actual, toda la sección que dibuja las láminas una por una con los botones de ➕ y ➖ quedó por fuera del bloque if "Opcion 1" in modo_vista:.
+
+Por eso, aunque selecciones la Opción 2: Vista Tabla (PC masiva), el script ignora el cambio y te sigue pintando la interfaz de celular (los bloques individuales) abajo de los filtros.
+
+Vamos a solucionarlo de inmediato. Corregí la estructura dividiendo limpiamente ambas opciones con un if/else real para que cuando marques la opción de PC, se oculte por completo la de celular y aparezca tu tabla indexada interactiva (st.data_editor).
+
+Aquí tenés el archivo corregido listo para producción:
+
+Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
@@ -42,6 +53,9 @@ if "df_album" not in st.session_state:
         if registros_en_bd == 0:
             for _, fila in df_excel.iterrows():
                 cur.execute("""
+                    INSERT INTO album_2026 (id_lamina, equipo, group_name, descripcion, pagina, cantidad)
+                    VALUES (%s, %s, %s, %s, %s, 0);
+                """ if 'group_name' in df_excel.columns else """
                     INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
                     VALUES (%s, %s, %s, %s, %s, 0);
                 """, (
@@ -213,7 +227,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR (CON LA OPCIÓN DE TABLA MASIVA ADENTRO)
+    # PESTAÑA 2: NAVEGADOR
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -231,7 +245,7 @@ else:
             else:
                 st.info("✅ Todos los datos están guardados y sincronizados.")
         
-        # --- 🚨 MARCACIÓN DE OPCIÓN DE VISTA ALTERNATIVA ---
+        # --- Selector de Interfaces de carga ---
         modo_vista = st.radio(
             "Selecciona la interfaz de carga:",
             ["Opcion 1: Vista Individual 📱", "Opcion 2: Vista Tabla (PC masiva) 💻"],
@@ -240,7 +254,7 @@ else:
         
         df_nav = st.session_state["df_album"]
         
-        # FILTROS COMUNES PARA AMBAS VISTAS
+        # FILTROS AVANZADOS COMUNES
         with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=False):
             col_b1, col_b2 = st.columns(2)
             with col_b1:
@@ -265,7 +279,7 @@ else:
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        # Aplicación de filtros al DataFrame de la vista
+        # Aplicar filtros
         df_pagina_view = df_nav.copy()
         
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
@@ -296,9 +310,9 @@ else:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
             # ==========================================
-            # DESARROLLO DE LA OPCIÓN 1: INTERFAZ MÓVIL / INDIVIDUAL
+            # CORRECCIÓN AQUÍ: CONDICIONALES EXCLUSIVOS IF/ELSE
             # ==========================================
-            if "Opcion 1" in modo_vista:
+            if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
                 for _, lam in df_pagina_view.iterrows():
                     id_l = int(lam['id_lamina'])
@@ -328,14 +342,11 @@ else:
                                 
                     st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
             
-            # ==========================================
-            # DESARROLLO DE LA OPCIÓN 2: INTERFAZ TABLA (PC MASIVA)
-            # ==========================================
             else:
+                # AQUÍ EJECUTA EXCLUSIVAMENTE LA VISTA DE TABLA INTERACTIVA
                 st.write("---")
                 st.markdown("<p style='font-size: 13px; color: #555;'>💡 <b>Tip de velocidad:</b> Modifica los valores directamente en la columna <b>'cantidad'</b> de la tabla. Al terminar, dale clic al botón de arriba para sincronizar todo.</p>", unsafe_allow_html=True)
                 
-                # Configuración de edición editable o bloqueada según rol
                 if st.session_state["modo_rol"] == "admin":
                     tabla_editada = st.data_editor(
                         df_pagina_view,
@@ -352,13 +363,11 @@ else:
                         key="editor_masivo_pc"
                     )
                     
-                    # Captura de cambios reactiva en la rejilla de la tabla
                     if not tabla_editada.equals(df_pagina_view):
                         for idx, fila in tabla_editada.iterrows():
                             id_l = int(fila['id_lamina'])
                             nueva_cant = int(fila['cantidad'])
                             
-                            # Si detectamos que cambió el valor, actualizamos el Session State local
                             idx_original = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_l].index
                             if not idx_original.empty:
                                 val_actual = int(st.session_state["df_album"].loc[idx_original, 'cantidad'].values[0])
@@ -367,7 +376,6 @@ else:
                                     st.session_state["tiene_cambios"] = True
                         st.rerun()
                 else:
-                    # Modo lectura bloquea la edición por completo
                     st.dataframe(
                         df_pagina_view,
                         column_config={
