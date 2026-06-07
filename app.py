@@ -12,7 +12,7 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🔒 FLUJO SEGURO: EL EXCEL DA LA PAGINACIÓN, POSTGRES GUARDA TUS CANTIDADES ---
+# --- 🔒 FLUJO SEGURO ---
 if "df_album" not in st.session_state:
     archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     
@@ -81,18 +81,18 @@ if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
 
 
-# --- CALLBACKS DE CONTEO LOCAL ---
-def registrar_cambio_local(id_lamina, operacion):
+# --- CALLBACK DE CONTEO ADAPTATIVO (SIN SUB-BOTONES INTERNOS) ---
+def ejecutar_accion_lamina(id_lamina, modo_accion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
         actual = int(st.session_state["df_album"].loc[idx, 'cantidad'].values[0])
-        if operacion == "sumar":
+        if modo_accion == "➕ Incrementar (+1)":
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual + 1
             st.session_state["tiene_cambios"] = True
-        elif operacion == "restar" and actual > 0:
+        elif modo_accion == "➖ Decrementar (-1)" and actual > 0:
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
-        elif operacion == "resetear":
+        elif modo_accion == "🗑️ Reiniciar (0)":
             st.session_state["df_album"].loc[idx, 'cantidad'] = 0
             st.session_state["tiene_cambios"] = True
 
@@ -232,7 +232,7 @@ else:
                     forzar_sincronizacion_bd()
                     st.rerun()
             else:
-                st.info("✅ Todos los datos están guardados y sincronizados.")
+                st.info("✅ Todos los datos están guardados.")
         
         # --- Selector Global de Interfaz de Carga ---
         modo_vista = st.radio(
@@ -299,69 +299,80 @@ else:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
             # ==========================================================
-            # OPCIÓN 1: INTERFAZ MÓVIL OPTIMIZADA (MATRIZ COMPACTA DE UN TOQUE)
+            # OPCIÓN 1: INTERFAZ MÓVIL REFORMADA (MATRIZ LIMPIA CON ACCIÓN SUPERIOR)
             # ==========================================================
             if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
-                st.markdown("<p style='font-size: 13px; color: #555; text-align: center;'>⚡ <b>Modo Rápido Móvil:</b> Toca el número para sumarle 1 lámina. <br>Usa el botón sutil 🔄 al lado si deseas dejarla en cero (0).</p>", unsafe_allow_html=True)
                 
-                # Agrupar las láminas filtradas para pintarlas de forma ordenada y compacta
-                total_items = len(df_pagina_view)
-                columnas_por_fila = 4  # Ajuste perfecto para pantallas de celular
+                # Selector de acción superior para mantener la grilla 100% limpia sin botones estorbando abajo
+                modo_click = "➕ Incrementar (+1)"
+                if st.session_state["modo_rol"] == "admin":
+                    modo_click = st.radio(
+                        "👇 Elige qué hace el toque en los cuadritos de abajo:",
+                        ["➕ Incrementar (+1)", "➖ Decrementar (-1)", "🗑️ Reiniciar (0)"],
+                        horizontal=True
+                    )
                 
-                for i in range(0, total_items, columnas_por_fila):
-                    bloque_laminas = df_pagina_view.iloc[i : i + columnas_por_fila]
-                    columnas_st = st.columns(columnas_por_fila)
+                # Función interna para pintar una grilla limpia de un dataframe dado
+                def renderizar_cuadrícula_limpia(df_bloque):
+                    columnas_por_fila = 4
+                    total_bloque = len(df_bloque)
                     
-                    for idx_col, (_, lam) in enumerate(bloque_laminas.items() if isinstance(bloque_laminas, pd.Series) else bloque_laminas.iterrows()):
-                        id_l = int(lam['id_lamina'])
-                        cant_actual = int(lam['cantidad'])
+                    for row_idx in range(0, total_bloque, columnas_por_fila):
+                        sub_df = df_bloque.iloc[row_idx : row_idx + columnas_por_fila]
+                        columnas_st = st.columns(columnas_por_fila)
                         
-                        # Definir etiquetas de badge compactos según cantidad
-                        if cant_actual == 0:
-                            label_boton = f"N° {id_l}\n(Falta)"
-                            color_style = "secondary"
-                        elif cant_actual == 1:
-                            label_boton = f"N° {id_l}\n✔ (1)"
-                            color_style = "primary"
-                        else:
-                            label_boton = f"N° {id_l}\n🔁 ({cant_actual})"
-                            color_style = "primary"
+                        for idx_col, (_, lam) in enumerate(sub_df.iterrows()):
+                            id_l = int(lam['id_lamina'])
+                            cant_actual = int(lam['cantidad'])
                             
-                        with columnas_st[idx_col]:
-                            # Botón principal táctil de un solo toque para sumar
-                            if st.session_state["modo_rol"] == "admin":
-                                st.button(
-                                    label_boton, 
-                                    key=f"btn_tactil_{id_l}", 
-                                    on_click=registrar_cambio_local, 
-                                    args=(id_l, "sumar"),
-                                    use_container_width=True,
-                                    type=color_style
-                                )
-                                # Mini botón sutil para resetear o restar sin dañar el espacio vertical
-                                c_sub1, c_sub2 = st.columns([1, 1])
-                                with c_sub1:
-                                    st.button("➖", key=f"sub_m_{id_l}", on_click=registrar_cambio_local, args=(id_l, "restar"), use_container_width=True)
-                                with c_sub2:
-                                    st.button("🔄", key=f"res_m_{id_l}", on_click=registrar_cambio_local, args=(id_l, "resetear"), use_container_width=True)
+                            # Tonalidades exactas solicitadas (Rojo suave, verde vivo general, naranja repetidos)
+                            if cant_actual == 0:
+                                label_render = f"🛑 {id_l}\n(Falta)"
+                                type_style = "secondary"  # Estilo neutro gris/rojo suave de streamlit
+                            elif cant_actual == 1:
+                                label_render = f"✅ {id_l}\nTengo"
+                                type_style = "primary"    # Resalta en verde/azul corporativo de la pestaña general
                             else:
-                                # Vista de solo lectura modo bloque compacto
-                                st.button(label_boton, key=f"btn_tactil_view_{id_l}", disabled=True, use_container_width=True)
+                                label_render = f"🔁 {id_l}\nRep ({cant_actual-1})"
+                                type_style = "primary"
                                 
+                            with columnas_st[idx_col]:
+                                if st.session_state["modo_rol"] == "admin":
+                                    st.button(
+                                        label_render, 
+                                        key=f"cuadrito_{id_l}", 
+                                        on_click=ejecutar_accion_lamina, 
+                                        args=(id_l, modo_click),
+                                        use_container_width=True,
+                                        type=type_style
+                                    )
+                                else:
+                                    st.button(label_render, key=f"cuadrito_view_{id_l}", disabled=True, use_container_width=True)
+
+                # Agrupación por equipos dinámica si está en "Ver Todo"
+                if seleccion_combo == "Ver Todo el Álbum (735 Láminas)" and buscar_equipo == "Todos los Equipos":
+                    equipos_unicos = df_pagina_view['equipo'].unique()
+                    for eq in equipos_unicos:
+                        df_eq_sub = df_pagina_view[df_pagina_view['equipo'] == eq]
+                        with st.expander(f"⚽ {eq} ({len(df_eq_sub)} láminas)", expanded=True):
+                            renderizar_cuadrícula_limpia(df_eq_sub)
+                else:
+                    renderizar_cuadrícula_limpia(df_pagina_view)
+                    
                 st.markdown("<br>", unsafe_allow_html=True)
             
             # ==========================================================
-            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (SIN BLOQUEO DE COLUMNAS)
+            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (SIN NINGÚN BLOQUEO DE CELDAS)
             # ==========================================================
             else:
                 st.write("---")
-                st.markdown("<p style='font-size: 13px; color: #555;'>💡 <b>Tip de velocidad:</b> Modifica directamente los valores en cualquiera de las celdas disponibles.</p>", unsafe_allow_html=True)
+                st.markdown("<p style='font-size: 13px; color: #555;'>💡 <b>Tip de velocidad:</b> Puedes alterar directamente cualquier celda (No., Equipo, Pag., Cantidad) sin bloqueos de grilla.</p>", unsafe_allow_html=True)
                 
                 df_ultra_reducido_pc = df_pagina_view[['id_lamina', 'equipo', 'pagina', 'cantidad']].copy()
                 df_ultra_reducido_pc = df_ultra_reducido_pc.rename(columns={'id_lamina': 'No.', 'pagina': 'Pag.'})
                 
-                # Se eliminó el "disabled=True" de las columnas de orden técnico para permitir edición total
+                # Configuración libre al 100% (Se eliminó disabled=True de todas las columnas)
                 config_columnas_pc = {
                     "No.": st.column_config.NumberColumn("No.", format="%d", pinned=True, width=45),
                     "equipo": st.column_config.TextColumn("⚽ Equipo", pinned=True, width=140),
