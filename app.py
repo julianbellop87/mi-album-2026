@@ -92,6 +92,9 @@ def registrar_cambio_local(id_lamina, operacion):
         elif operacion == "restar" and actual > 0:
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
             st.session_state["tiene_cambios"] = True
+        elif operacion == "resetear":
+            st.session_state["df_album"].loc[idx, 'cantidad'] = 0
+            st.session_state["tiene_cambios"] = True
 
 # --- GUARDADO REMOTO ---
 def forzar_sincronizacion_bd():
@@ -296,60 +299,73 @@ else:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
             # ==========================================================
-            # OPCIÓN 1: VISTA MÓVIL REFORMADA (FILAS LIMPIAS Y BOTONES ACCESIBLES)
+            # OPCIÓN 1: INTERFAZ MÓVIL OPTIMIZADA (MATRIZ COMPACTA DE UN TOQUE)
             # ==========================================================
             if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
+                st.markdown("<p style='font-size: 13px; color: #555; text-align: center;'>⚡ <b>Modo Rápido Móvil:</b> Toca el número para sumarle 1 lámina. <br>Usa el botón sutil 🔄 al lado si deseas dejarla en cero (0).</p>", unsafe_allow_html=True)
                 
-                for _, lam in df_pagina_view.iterrows():
-                    id_l = int(lam['id_lamina'])
-                    cant_actual = lam['cantidad']
+                # Agrupar las láminas filtradas para pintarlas de forma ordenada y compacta
+                total_items = len(df_pagina_view)
+                columnas_por_fila = 4  # Ajuste perfecto para pantallas de celular
+                
+                for i in range(0, total_items, columnas_por_fila):
+                    bloque_laminas = df_pagina_view.iloc[i : i + columnas_por_fila]
+                    columnas_st = st.columns(columnas_por_fila)
                     
-                    # Regla de estadios limpios
-                    desc_render = "" if str(lam['equipo']).lower() == "estadios" else lam['descripcion']
-                    
-                    # Texto indicativo de estado simplificado
-                    if cant_actual == 0:
-                        estado_txt = "<span style='color: #E74C3C; font-weight: bold;'>Falta 🚨</span>"
-                    elif cant_actual == 1:
-                        estado_txt = "<span style='color: #2ECC71; font-weight: bold;'>Tengo ✅</span>"
-                    else:
-                        estado_txt = f"<span style='color: #F39C12; font-weight: bold;'>Rep: {cant_actual-1} 🔁</span>"
-
-                    # Layout de fila equilibrada: Información a la izquierda, controles a la derecha
-                    if st.session_state["modo_rol"] == "admin":
-                        c_info, c_menos, c_cant, c_mas = st.columns([3.5, 0.8, 0.8, 0.8])
-                    else:
-                        c_info = st.container()
-
-                    with c_info:
-                        st.markdown(f"**No. {id_l}** (Pág. {lam['pagina']}) — {estado_txt}<br><span style='font-size: 13px; color: #555;'>{lam['equipo']} {f'• {desc_render}' if desc_render else ''}</span>", unsafe_allow_html=True)
-                    
-                    if st.session_state["modo_rol"] == "admin":
-                        with c_menos:
-                            st.button("➖", key=f"sub_f_{id_l}", on_click=registrar_cambio_local, args=(id_l, "restar"), use_container_width=True)
-                        with c_cant:
-                            st.markdown(f"<p style='text-align: center; font-size: 16px; font-weight: bold; margin-top: 5px;'>{cant_actual}</p>", unsafe_allow_html=True)
-                        with c_mas:
-                            st.button("➕", key=f"add_f_{id_l}", on_click=registrar_cambio_local, args=(id_l, "sumar"), use_container_width=True)
+                    for idx_col, (_, lam) in enumerate(bloque_laminas.items() if isinstance(bloque_laminas, pd.Series) else bloque_laminas.iterrows()):
+                        id_l = int(lam['id_lamina'])
+                        cant_actual = int(lam['cantidad'])
+                        
+                        # Definir etiquetas de badge compactos según cantidad
+                        if cant_actual == 0:
+                            label_boton = f"N° {id_l}\n(Falta)"
+                            color_style = "secondary"
+                        elif cant_actual == 1:
+                            label_boton = f"N° {id_l}\n✔ (1)"
+                            color_style = "primary"
+                        else:
+                            label_boton = f"N° {id_l}\n🔁 ({cant_actual})"
+                            color_style = "primary"
+                            
+                        with columnas_st[idx_col]:
+                            # Botón principal táctil de un solo toque para sumar
+                            if st.session_state["modo_rol"] == "admin":
+                                st.button(
+                                    label_boton, 
+                                    key=f"btn_tactil_{id_l}", 
+                                    on_click=registrar_cambio_local, 
+                                    args=(id_l, "sumar"),
+                                    use_container_width=True,
+                                    type=color_style
+                                )
+                                # Mini botón sutil para resetear o restar sin dañar el espacio vertical
+                                c_sub1, c_sub2 = st.columns([1, 1])
+                                with c_sub1:
+                                    st.button("➖", key=f"sub_m_{id_l}", on_click=registrar_cambio_local, args=(id_l, "restar"), use_container_width=True)
+                                with c_sub2:
+                                    st.button("🔄", key=f"res_m_{id_l}", on_click=registrar_cambio_local, args=(id_l, "resetear"), use_container_width=True)
+                            else:
+                                # Vista de solo lectura modo bloque compacto
+                                st.button(label_boton, key=f"btn_tactil_view_{id_l}", disabled=True, use_container_width=True)
                                 
-                    st.markdown("<hr style='margin: 6px 0px; border: 0.5px solid #e0e0e0;'>", unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
             
             # ==========================================================
-            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (PC AJUSTADA AL MÍNIMO)
+            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (SIN BLOQUEO DE COLUMNAS)
             # ==========================================================
             else:
                 st.write("---")
-                st.markdown("<p style='font-size: 13px; color: #555;'>💡 <b>Tip de velocidad:</b> Modifica directamente los valores en la columna <b>'Cantidad'</b>.</p>", unsafe_allow_html=True)
+                st.markdown("<p style='font-size: 13px; color: #555;'>💡 <b>Tip de velocidad:</b> Modifica directamente los valores en cualquiera de las celdas disponibles.</p>", unsafe_allow_html=True)
                 
                 df_ultra_reducido_pc = df_pagina_view[['id_lamina', 'equipo', 'pagina', 'cantidad']].copy()
                 df_ultra_reducido_pc = df_ultra_reducido_pc.rename(columns={'id_lamina': 'No.', 'pagina': 'Pag.'})
                 
-                # Reducción drástica de anchos (width) para compactar al máximo posible
+                # Se eliminó el "disabled=True" de las columnas de orden técnico para permitir edición total
                 config_columnas_pc = {
-                    "No.": st.column_config.NumberColumn("No.", disabled=True, format="%d", pinned=True, width=45),
-                    "equipo": st.column_config.TextColumn("⚽ Equipo", disabled=True, pinned=True, width=140),
-                    "Pag.": st.column_config.NumberColumn("Pag.", disabled=True, format="%d", pinned=True, width=45),
+                    "No.": st.column_config.NumberColumn("No.", format="%d", pinned=True, width=45),
+                    "equipo": st.column_config.TextColumn("⚽ Equipo", pinned=True, width=140),
+                    "Pag.": st.column_config.NumberColumn("Pag.", format="%d", pinned=True, width=45),
                     "cantidad": st.column_config.NumberColumn("🔢 Cantidad", min_value=0, max_value=99, step=1, required=True, width=85),
                 }
 
