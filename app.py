@@ -265,7 +265,7 @@ else:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
         else:
-            st.success("🔑 Modo Administrador Activo. Los cambios se guardan automáticamente en tiempo real ⚡")
+            st.success("🔑 Modo Administrator Activo. Los cambios se guardan automáticamente en tiempo real ⚡")
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
@@ -394,7 +394,7 @@ else:
                 st.markdown("<br>", unsafe_allow_html=True)
             
             # ==========================================================
-            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA
+            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (CORREGIDA SIN ERROR)
             # ==========================================================
             else:
                 st.write("---")
@@ -411,7 +411,8 @@ else:
                 df_ultra_reducido_pc['Estado'] = df_ultra_reducido_pc['cantidad'].apply(mapear_estado_visual)
                 df_ultra_reducido_pc = df_ultra_reducido_pc.rename(columns={'id_lamina': 'No.', 'pagina': 'Pag.'})
                 
-                df_ultra_reducido_pc = df_ultra_reducido_pc[['No.', '⚽ Equipo', 'Pag.', 'Estado', 'cantidad']]
+                # CORRECCIÓN AQUÍ: Se usan los nombres de columna correctos para evitar KeyError
+                df_ultra_reducido_pc = df_ultra_reducido_pc[['No.', 'equipo', 'Pag.', 'Estado', 'cantidad']]
                 df_ultra_reducido_pc.columns = ['No.', '⚽ Equipo', 'Pag.', 'Estado Actual', '🔢 Cantidad']
 
                 config_columnas_pc = {
