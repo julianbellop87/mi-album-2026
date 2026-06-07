@@ -7,6 +7,37 @@ import os
 # 1. CONFIGURACIÓN DE PÁGINA ESENCIAL
 st.set_page_config(page_title="Mi Álbum 2026", layout="centered")
 
+# --- ESTILOS CSS PERSONALIZADOS PARA COLORES DE LÁMINAS ---
+st.html("""
+<style>
+    /* Estilos globales para botones de láminas */
+    div.stButton > button {
+        border-radius: 8px !important;
+        font-weight: bold !important;
+        transition: transform 0.1s ease !important;
+        border: none !important;
+    }
+    div.stButton > button:active {
+        transform: scale(0.95) !important;
+    }
+    /* Clase Falta: Rojo Suave */
+    div.lamina-falta > div > div > button {
+        background-color: #FADBD8 !important;
+        color: #78281F !important;
+    }
+    /* Clase Tengo: Verde General */
+    div.lamina-tengo > div > div > button {
+        background-color: #2ECC71 !important;
+        color: white !important;
+    }
+    /* Clase Repetida: Naranja General */
+    div.lamina-repetida > div > div > button {
+        background-color: #F39C12 !important;
+        color: white !important;
+    }
+</style>
+""")
+
 DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d8gfnpnlk1mc73er3tc0-a.virginia-postgres.render.com/db_album_2026"
 
 def get_connection():
@@ -42,7 +73,7 @@ if "df_album" not in st.session_state:
         if registros_en_bd == 0:
             for _, fila in df_excel.iterrows():
                 cur.execute("""
-                    INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
+                    INSERT INTO album_2026 (id_lamina, equipo, groupo, descripcion, pagina, cantidad)
                     VALUES (%s, %s, %s, %s, %s, 0);
                 """, (
                     int(fila['Laminas']), 
@@ -77,54 +108,42 @@ if "df_album" not in st.session_state:
     
     st.session_state["df_album"] = df_final.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
-if "tiene_cambios" not in st.session_state:
-    st.session_state["tiene_cambios"] = False
+
+# --- GUARDADO DIRECTO AUTOMÁTICO EN LA NUBE ---
+def guardar_lamina_en_bd(id_lamina, nueva_cantidad):
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE album_2026 
+            SET cantidad = %s 
+            WHERE id_lamina = %s;
+        """, (nueva_cantidad, id_lamina))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        st.error(f"Error al sincronizar cambio en la nube: {e}")
 
 
-# --- CALLBACK DE CONTEO ADAPTATIVO (SIN SUB-BOTONES INTERNOS) ---
+# --- CALLBACK DE ACCIÓN DIRECTA (PROCESA LOCAL Y GUARDA EN BD AL TIEMPO) ---
 def ejecutar_accion_lamina(id_lamina, modo_accion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
         actual = int(st.session_state["df_album"].loc[idx, 'cantidad'].values[0])
+        nueva_cant = actual
+        
         if modo_accion == "➕ Incrementar (+1)":
-            st.session_state["df_album"].loc[idx, 'cantidad'] = actual + 1
-            st.session_state["tiene_cambios"] = True
+            nueva_cant = actual + 1
         elif modo_accion == "➖ Decrementar (-1)" and actual > 0:
-            st.session_state["df_album"].loc[idx, 'cantidad'] = actual - 1
-            st.session_state["tiene_cambios"] = True
+            nueva_cant = actual - 1
         elif modo_accion == "🗑️ Reiniciar (0)":
-            st.session_state["df_album"].loc[idx, 'cantidad'] = 0
-            st.session_state["tiene_cambios"] = True
-
-# --- GUARDADO REMOTO ---
-def forzar_sincronizacion_bd():
-    with st.spinner("Sincronizando inventario con Postgres..."):
-        try:
-            conn = get_connection()
-            cur = conn.cursor()
+            nueva_cant = 0
             
-            for _, fila in st.session_state["df_album"].iterrows():
-                cur.execute("""
-                    INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id_lamina) 
-                    DO UPDATE SET cantidad = EXCLUDED.cantidad;
-                """, (
-                    int(fila['id_lamina']), 
-                    str(fila['equipo']), 
-                    str(fila['grupo']), 
-                    str(fila['descripcion']), 
-                    int(fila['pagina']), 
-                    int(fila['cantidad'])
-                ))
-            
-            conn.commit()
-            cur.close()
-            conn.close()
-            st.session_state["tiene_cambios"] = False
-            st.toast("¡Álbum guardado con éxito! 🏆", icon="💾")
-        except Exception as e:
-            st.error(f"Error al guardar datos: {e}")
+        # Actualiza memoria local
+        st.session_state["df_album"].loc[idx, 'cantidad'] = nueva_cant
+        # Guarda directamente en Postgres sin intermediarios
+        guardar_lamina_en_bd(id_lamina, nueva_cant)
 
 
 # ==========================================================
@@ -167,12 +186,11 @@ else:
             st.session_state["modo_rol"] = None
             if "df_album" in st.session_state:
                 del st.session_state["df_album"]
-            st.session_state["tiene_cambios"] = False
             st.rerun()
 
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
 
-    # PESTAÑA 1: DASHBOARD
+    # PESTAÑA 1: DASHBOARD (GENERAL)
     with menu_principal[0]:
         df_gen = st.session_state["df_album"].copy()
         df_gen['tiene'] = df_gen['cantidad'].apply(lambda x: 1 if x > 0 else 0)
@@ -221,20 +239,11 @@ else:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
         else:
-            st.success("🔑 Modo Administrator Activo.")
+            st.success("🔑 Modo Administrador Activo. Los cambios se guardan automáticamente en tiempo real ⚡")
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
-        if st.session_state["modo_rol"] == "admin":
-            if st.session_state["tiene_cambios"]:
-                st.warning("⚠️ Tienes modificaciones locales sin guardar en la nube.")
-                if st.button("💾 GUARDAR CAMBIOS EN LA NUBE", type="primary", use_container_width=True):
-                    forzar_sincronizacion_bd()
-                    st.rerun()
-            else:
-                st.info("✅ Todos los datos están guardados.")
-        
-        # --- Selector Global de Interfaz de Carga ---
+        # Selector de Interfaz de Carga
         modo_vista = st.radio(
             "Selecciona la interfaz de carga:",
             ["Opcion 1: Vista Individual 📱", "Opcion 2: Vista Tabla (PC masiva) 💻"],
@@ -243,7 +252,7 @@ else:
         
         df_nav = st.session_state["df_album"]
         
-        # FILTROS AVANZADOS COMUNES
+        # FILTROS AVANZADOS
         with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=False):
             col_b1, col_b2 = st.columns(2)
             with col_b1:
@@ -299,21 +308,21 @@ else:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
             # ==========================================================
-            # OPCIÓN 1: INTERFAZ MÓVIL REFORMADA (MATRIZ LIMPIA CON ACCIÓN SUPERIOR)
+            # OPCIÓN 1: INTERFAZ MÓVIL (MATRIZ COMPACTA DE PINTADO NATIVO)
             # ==========================================================
             if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
                 
-                # Selector de acción superior para mantener la grilla 100% limpia sin botones estorbando abajo
+                # Selector de acción superior
                 modo_click = "➕ Incrementar (+1)"
                 if st.session_state["modo_rol"] == "admin":
                     modo_click = st.radio(
-                        "👇 Elige qué hace el toque en los cuadritos de abajo:",
+                        "👇 Elige la acción para el toque de los cuadritos:",
                         ["➕ Incrementar (+1)", "➖ Decrementar (-1)", "🗑️ Reiniciar (0)"],
                         horizontal=True
                     )
                 
-                # Función interna para pintar una grilla limpia de un dataframe dado
+                # Renderizador de cuadrícula aplicando contenedores CSS dinámicos
                 def renderizar_cuadrícula_limpia(df_bloque):
                     columnas_por_fila = 4
                     total_bloque = len(df_bloque)
@@ -326,31 +335,34 @@ else:
                             id_l = int(lam['id_lamina'])
                             cant_actual = int(lam['cantidad'])
                             
-                            # Tonalidades exactas solicitadas (Rojo suave, verde vivo general, naranja repetidos)
+                            # Asignación de etiquetas y contenedores CSS según volumen de láminas
                             if cant_actual == 0:
-                                label_render = f"🛑 {id_l}\n(Falta)"
-                                type_style = "secondary"  # Estilo neutro gris/rojo suave de streamlit
+                                label_render = f"🛑 {id_l}\nFalta"
+                                wrapper_class = "lamina-falta"
                             elif cant_actual == 1:
                                 label_render = f"✅ {id_l}\nTengo"
-                                type_style = "primary"    # Resalta en verde/azul corporativo de la pestaña general
+                                wrapper_class = "lamina-tengo"
                             else:
-                                label_render = f"🔁 {id_l}\nRep ({cant_actual-1})"
-                                type_style = "primary"
+                                label_render = f"🔁 {id_l}\n(x{cant_actual})"
+                                wrapper_class = "lamina-repetida"
                                 
                             with columnas_st[idx_col]:
-                                if st.session_state["modo_rol"] == "admin":
-                                    st.button(
-                                        label_render, 
-                                        key=f"cuadrito_{id_l}", 
-                                        on_click=ejecutar_accion_lamina, 
-                                        args=(id_l, modo_click),
-                                        use_container_width=True,
-                                        type=type_style
-                                    )
-                                else:
-                                    st.button(label_render, key=f"cuadrito_view_{id_l}", disabled=True, use_container_width=True)
+                                # El contenedor div fuerza el estilo CSS inyectado arriba
+                                with st.container(key=f"wrap_{id_l}"):
+                                    st.html(f"<div class='{wrapper_class}'>")
+                                    if st.session_state["modo_rol"] == "admin":
+                                        st.button(
+                                            label_render, 
+                                            key=f"btn_{id_l}", 
+                                            on_click=ejecutar_accion_lamina, 
+                                            args=(id_l, modo_click),
+                                            use_container_width=True
+                                        )
+                                    else:
+                                        st.button(label_render, key=f"btn_view_{id_l}", disabled=True, use_container_width=True)
+                                    st.html("</div>")
 
-                # Agrupación por equipos dinámica si está en "Ver Todo"
+                # Agrupación dinámica por Equipos/Selecciones cuando se ve todo el álbum
                 if seleccion_combo == "Ver Todo el Álbum (735 Láminas)" and buscar_equipo == "Todos los Equipos":
                     equipos_unicos = df_pagina_view['equipo'].unique()
                     for eq in equipos_unicos:
@@ -363,16 +375,13 @@ else:
                 st.markdown("<br>", unsafe_allow_html=True)
             
             # ==========================================================
-            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (SIN NINGÚN BLOQUEO DE CELDAS)
+            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA
             # ==========================================================
             else:
                 st.write("---")
-                st.markdown("<p style='font-size: 13px; color: #555;'>💡 <b>Tip de velocidad:</b> Puedes alterar directamente cualquier celda (No., Equipo, Pag., Cantidad) sin bloqueos de grilla.</p>", unsafe_allow_html=True)
-                
                 df_ultra_reducido_pc = df_pagina_view[['id_lamina', 'equipo', 'pagina', 'cantidad']].copy()
                 df_ultra_reducido_pc = df_ultra_reducido_pc.rename(columns={'id_lamina': 'No.', 'pagina': 'Pag.'})
                 
-                # Configuración libre al 100% (Se eliminó disabled=True de todas las columnas)
                 config_columnas_pc = {
                     "No.": st.column_config.NumberColumn("No.", format="%d", pinned=True, width=45),
                     "equipo": st.column_config.TextColumn("⚽ Equipo", pinned=True, width=140),
@@ -399,7 +408,7 @@ else:
                                 val_actual = int(st.session_state["df_album"].loc[idx_original, 'cantidad'].values[0])
                                 if val_actual != nueva_cant:
                                     st.session_state["df_album"].loc[idx_original, 'cantidad'] = nueva_cant
-                                    st.session_state["tiene_cambios"] = True
+                                    guardar_lamina_en_bd(id_l, nueva_cant)
                         st.rerun()
                 else:
                     st.dataframe(
