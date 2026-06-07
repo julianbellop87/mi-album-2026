@@ -1,12 +1,3 @@
-¡Ah, perfecto, Julián! Ya te entiendo exactamente para dónde vas. Querés una tabla súper minimalista, compacta y limpia, ideal para meter datos en ráfaga.
-
-El problema con que se siguiera corriendo es que, al tener tantas columnas (Grupo, Descripción, etc.), Streamlit se ve forzado a meter el scroll horizontal. Si dejamos únicamente 3 columnas esenciales (No., Equipo y Cantidad), la tabla se reduce tanto que cabe completa en la pantalla sin necesidad de scroll, y al estar bloqueadas las dos primeras con pinned=True, la experiencia de usuario queda perfecta.
-
-Además, apliqué la regla lógica para que cuando el equipo sea "Estadios", la celda de la descripción no muestre texto largo, sino que quede completamente vacía, dejando limpios esos 15 registros.
-
-Aquí tenés el script completo con la tabla ultra reducida y optimizada:
-
-Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
