@@ -12,17 +12,17 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🚀 CONTROL ABSOLUTO: ORDEN NATURAL DE TU EXCEL ---
+# --- 🚀 CONTROL ABSOLUTO: EL EXCEL ES LA VALOR REAL ---
 if "df_album" not in st.session_state:
     archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     
     try:
-        # 1. Leer el archivo Excel real respetando tus columnas
+        # 1. Forzar la lectura limpia de tu Excel (Tu ley fundamental)
         df_excel = pd.read_excel(archivo_excel)
         df_excel['Laminas'] = df_excel['Laminas'].astype(int)
         df_excel['Pagina'] = df_excel['Pagina'].astype(int)
         
-        # 2. Traer las cantidades guardadas en Postgres
+        # 2. Leer SOLO las cantidades de Postgres para no alterar tus páginas
         conn = get_connection()
         df_bd = pd.read_sql_query("SELECT id_lamina, cantidad FROM album_2026;", conn)
         conn.close()
@@ -32,7 +32,7 @@ if "df_album" not in st.session_state:
     except Exception as e:
         df_bd = pd.DataFrame(columns=['id_lamina', 'cantidad'])
 
-    # 3. Unir los datos manteniendo el orden de filas exacto de tu Excel
+    # 3. Cruzar asegurando que PREVALECE la información de tu Excel
     df_unido = pd.merge(
         df_excel, df_bd, 
         left_on='Laminas', right_on='id_lamina', 
@@ -41,7 +41,7 @@ if "df_album" not in st.session_state:
     
     df_unido['cantidad'] = df_unido['cantidad'].fillna(0).astype(int)
     
-    # Mapeo limpio respetando tus nombres de columna del Excel
+    # Reconstrucción limpia: Ignoramos la paginación vieja de la BD
     df_final = pd.DataFrame()
     df_final['id_lamina'] = df_unido['Laminas']
     df_final['equipo'] = df_unido['Equipo'].astype(str).str.strip()
@@ -50,7 +50,7 @@ if "df_album" not in st.session_state:
     df_final['pagina'] = df_unido['Pagina'].astype(int)
     df_final['cantidad'] = df_unido['cantidad']
     
-    # Guardamos en la sesión ordenando por número de lámina consecutivo (1 al 735)
+    # Mantener orden consecutivo estricto
     st.session_state["df_album"] = df_final.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
 if "tiene_cambios" not in st.session_state:
@@ -92,7 +92,7 @@ def forzar_sincronizacion_bd():
                     INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id_lamina) 
-                    DO UPDATE SET cantidad = EXCLUDED.cantidad;
+                    DO UPDATE SET cantidad = EXCLUDED.cantidad, pagina = EXCLUDED.pagina, equipo = EXCLUDED.equipo;
                 """, (
                     int(fila['id_lamina']), 
                     str(fila['equipo']), 
@@ -164,7 +164,7 @@ else:
 
         tengo_lista = df_gen[df_gen['cantidad'] > 0]['id_lamina'].tolist()
         faltan_lista = df_gen[df_gen['cantidad'] == 0]['id_lamina'].tolist()
-        repes_dict = df_gen[df_gen['cantidad'] > 1].set_index('id_lamina')['es_repetida'].to_dict()
+        repes_dict = df_gen[df_gen['whitespace_count'] > 1].whitespace_count.to_dict() if 'whitespace_count' in df_gen else df_gen[df_gen['cantidad'] > 1].set_index('id_lamina')['es_repetida'].to_dict()
 
         total_laminas = len(df_gen)
         total_tengo = df_gen['tiene'].sum()
@@ -200,7 +200,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR (CONSECUCIÓN REAL DE TU EXCEL)
+    # PESTAÑA 2: NAVEGADOR
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -213,7 +213,7 @@ else:
             if st.session_state["tiene_cambios"]:
                 st.warning("⚠️ Tienes modificaciones locales sin guardar en la nube.")
                 if st.button("💾 GUARDAR CAMBIOS EN LA NUBE", type="primary", use_container_width=True):
-                    forrar_sincronizacion_bd()
+                    forzar_sincronizacion_bd()
                     st.rerun()
             else:
                 st.info("✅ Todos los datos están guardados y sincronizados.")
@@ -225,7 +225,6 @@ else:
             with col_b1:
                 buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="", placeholder="Ej: 16")
             with col_b2:
-                # Agrupar sin ordenar alfabéticamente para mantener el orden de llegada
                 lista_equipos_filtro = ["Todos los Equipos"] + list(df_nav.groupby('equipo', sort=False).first().index)
                 buscar_equipo = st.selectbox("⚽ Filtrar por Equipo:", lista_equipos_filtro)
                 
@@ -237,7 +236,7 @@ else:
                 paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())]
                 buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
 
-        # ✨ ORDEN NATURAL GARANTIZADO: Leemos fila por fila tu archivo usando sort=False
+        # Agrupación estricta por el orden natural del Excel
         secciones_unicas = df_nav.groupby(['pagina', 'equipo', 'grupo'], sort=False).size().reset_index()
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"]
         for _, r in secciones_unicas.iterrows():
@@ -249,7 +248,7 @@ else:
 
         df_pagina_view = df_nav.copy()
         
-        # Filtramos cruzando estrictamente el número de la página y el nombre exacto del equipo para que no se crucen cables
+        # Filtro cruzado inmune a errores de base de datos
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
             partes = seleccion_combo.split(" - ")
             pag_real = int(partes[0].replace("Pág. ", "").strip())
@@ -269,7 +268,13 @@ else:
         if buscar_por_pagina != "Todas las Páginas":
             df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
 
-        # Mantenemos siempre las láminas organizadas consecutivamente (1 al 735)
+        if filtro_inventario == "Solo Faltantes 🚨":
+            df_pagina_view = df_pagina_view[df_pagina_view['whitespace_count'] == 0] if 'whitespace_count' in df_pagina_view else df_pagina_view[df_pagina_view['cantidad'] == 0]
+        elif filtro_inventario == "Solo las que Tengo ✅":
+            df_pagina_view = df_pagina_view[df_pagina_view['whitespace_count'] > 0] if 'whitespace_count' in df_pagina_view else df_pagina_view[df_pagina_view['cantidad'] > 0]
+        elif filtro_inventario == "Solo Repetidas 🔁":
+            df_pagina_view = df_pagina_view[df_pagina_view['whitespace_count'] > 1] if 'whitespace_count' in df_pagina_view else df_pagina_view[df_pagina_view['cantidad'] > 1]
+
         df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
 
         if df_pagina_view.empty:
