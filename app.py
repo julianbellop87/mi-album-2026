@@ -12,17 +12,17 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🚀 CONTROL ABSOLUTO: EL EXCEL ES LA VALOR REAL ---
+# --- 🚀 REGLA DE ORO: EL EXCEL TIENE EL CONTROL ABSOLUTO ---
 if "df_album" not in st.session_state:
     archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     
     try:
-        # 1. Forzar la lectura limpia de tu Excel (Tu ley fundamental)
+        # 1. Cargar tu archivo Excel original
         df_excel = pd.read_excel(archivo_excel)
         df_excel['Laminas'] = df_excel['Laminas'].astype(int)
         df_excel['Pagina'] = df_excel['Pagina'].astype(int)
         
-        # 2. Leer SOLO las cantidades de Postgres para no alterar tus páginas
+        # 2. Traer ÚNICAMENTE las cantidades de la base de datos
         conn = get_connection()
         df_bd = pd.read_sql_query("SELECT id_lamina, cantidad FROM album_2026;", conn)
         conn.close()
@@ -32,7 +32,7 @@ if "df_album" not in st.session_state:
     except Exception as e:
         df_bd = pd.DataFrame(columns=['id_lamina', 'cantidad'])
 
-    # 3. Cruzar asegurando que PREVALECE la información de tu Excel
+    # 3. Cruzar datos garantizando que la paginación del Excel destruya cualquier dato viejo
     df_unido = pd.merge(
         df_excel, df_bd, 
         left_on='Laminas', right_on='id_lamina', 
@@ -41,7 +41,7 @@ if "df_album" not in st.session_state:
     
     df_unido['cantidad'] = df_unido['cantidad'].fillna(0).astype(int)
     
-    # Reconstrucción limpia: Ignoramos la paginación vieja de la BD
+    # Mapeo limpio usando estrictamente las columnas de tu archivo
     df_final = pd.DataFrame()
     df_final['id_lamina'] = df_unido['Laminas']
     df_final['equipo'] = df_unido['Equipo'].astype(str).str.strip()
@@ -50,7 +50,7 @@ if "df_album" not in st.session_state:
     df_final['pagina'] = df_unido['Pagina'].astype(int)
     df_final['cantidad'] = df_unido['cantidad']
     
-    # Mantener orden consecutivo estricto
+    # Guardar en memoria ordenando del 1 al 735 de forma consecutiva
     st.session_state["df_album"] = df_final.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
 if "tiene_cambios" not in st.session_state:
@@ -61,7 +61,7 @@ if "tiene_cambios" not in st.session_state:
 def registrar_cambio_local(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
-        actual = int(st.session_state["df_album"].loc[idx, 'cantidad'].values[0])
+        actual = int(st.session_state["df_album"].loc[idx, 'whitespace_count'].values[0]) if 'whitespace_count' in st.session_state["df_album"] else int(st.session_state["df_album"].loc[idx, 'cantidad'].values[0])
         if operacion == "sumar":
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual + 1
             st.session_state["tiene_cambios"] = True
@@ -164,7 +164,7 @@ else:
 
         tengo_lista = df_gen[df_gen['cantidad'] > 0]['id_lamina'].tolist()
         faltan_lista = df_gen[df_gen['cantidad'] == 0]['id_lamina'].tolist()
-        repes_dict = df_gen[df_gen['whitespace_count'] > 1].whitespace_count.to_dict() if 'whitespace_count' in df_gen else df_gen[df_gen['cantidad'] > 1].set_index('id_lamina')['es_repetida'].to_dict()
+        repes_dict = df_gen[df_gen['cantidad'] > 1].set_index('id_lamina')['es_repetida'].to_dict()
 
         total_laminas = len(df_gen)
         total_tengo = df_gen['tiene'].sum()
@@ -200,7 +200,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR
+    # PESTAÑA 2: NAVEGADOR (CORREGIDA SIN VARIABLES FANTASMAS)
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -236,7 +236,7 @@ else:
                 paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())]
                 buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
 
-        # Agrupación estricta por el orden natural del Excel
+        # Agrupación por orden estricto del archivo de llegada
         secciones_unicas = df_nav.groupby(['pagina', 'equipo', 'grupo'], sort=False).size().reset_index()
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"]
         for _, r in secciones_unicas.iterrows():
@@ -248,7 +248,7 @@ else:
 
         df_pagina_view = df_nav.copy()
         
-        # Filtro cruzado inmune a errores de base de datos
+        # Filtro estricto cruzando página y nombre de equipo
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
             partes = seleccion_combo.split(" - ")
             pag_real = int(partes[0].replace("Pág. ", "").strip())
@@ -268,12 +268,13 @@ else:
         if buscar_por_pagina != "Todas las Páginas":
             df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
 
+        # CORRECCIÓN DE FILTROS: Uso estricto de la columna 'cantidad'
         if filtro_inventario == "Solo Faltantes 🚨":
-            df_pagina_view = df_pagina_view[df_pagina_view['whitespace_count'] == 0] if 'whitespace_count' in df_pagina_view else df_pagina_view[df_pagina_view['cantidad'] == 0]
+            df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
         elif filtro_inventario == "Solo las que Tengo ✅":
-            df_pagina_view = df_pagina_view[df_pagina_view['whitespace_count'] > 0] if 'whitespace_count' in df_pagina_view else df_pagina_view[df_pagina_view['cantidad'] > 0]
+            df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 0]
         elif filtro_inventario == "Solo Repetidas 🔁":
-            df_pagina_view = df_pagina_view[df_pagina_view['whitespace_count'] > 1] if 'whitespace_count' in df_pagina_view else df_pagina_view[df_pagina_view['cantidad'] > 1]
+            df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
 
         df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
 
