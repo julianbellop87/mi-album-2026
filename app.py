@@ -96,7 +96,7 @@ if "df_album" not in st.session_state:
         if registros_en_bd == 0:
             for _, fila in df_excel.iterrows():
                 cur.execute("""
-                    INSERT INTO album_2026 (id_lamina, equipo, groupo, descripcion, pagina, cantidad)
+                    INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
                     VALUES (%s, %s, %s, %s, %s, 0);
                 """, (int(fila['Laminas']), str(fila['Equipo']).strip(), str(fila['Grupo']).strip(), str(fila['Descripicion']).strip(), int(fila['Pagina'])))
             conn.commit()
@@ -168,7 +168,7 @@ if not st.session_state["autenticado"]:
             st.session_state["modo_rol"] = "consulta"
             st.rerun()
 else:
-    st.markdown("<h2 style='text-align: center; margin-top: -10px; margin-bottom: 5px;'>🏆 Mi Álbum 2026</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center; margin-top: -10px; margin-bottom: 5px;'>🏆 Mi Álbum Personalizado</h2>", unsafe_allow_html=True)
     col_vacio, col_logout = st.columns([4, 1.2])
     with col_logout:
         if st.button("🚪 Salir"):
@@ -200,51 +200,13 @@ else:
         
         st.markdown(f"""
         <div style='display: flex; justify-content: space-around; text-align: center; background-color: #f0f2f6; padding: 10px; border-radius: 8px; margin-top: 5px; margin-bottom: 15px;'>
-            <div><b style='font-size: 11px; color: #2ecc71;'>✅ TENGO</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_tengo}</span></div>
-            <div><b style='font-size: 11px; color: #e74c3c;'>🚨 FALTAN</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_faltan}</span></div>
-            <div><b style='font-size: 11px; color: #f39c12;'>🔁 REPETIDAS</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_repes}</span></div>
+            <div><b style='font-size: 11px; color: #2ecc71;'>✅ TENGO</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_tengo} láminas</span></div>
+            <div><b style='font-size: 11px; color: #e74c3c;'>🚨 FALTAN</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_faltan} láminas</span></div>
+            <div><b style='font-size: 11px; color: #f39c12;'>🔁 REPETIDAS</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_repes} láminas</span></div>
         </div>
         """, unsafe_allow_html=True)
         
         st.markdown("<h6 style='text-align: center; margin-bottom: 10px;'>📲 Compartir Listados Consecutivos (Uno a Uno)</h6>", unsafe_allow_html=True)
-
-        # --- RE-DISEÑO DE MÓDULO INTELIGENTE Y ESTÉTICO ---
-        def renderizar_boton_inteligente(id_clave, titulo, texto_enviar, color_bg):
-            # Límite seguro estimado para evitar cortes de URL en WhatsApp
-            IMPERFECCION_WHATSAPP_LIMIT = 1500 
-            
-            if len(texto_enviar) < IMPERFECCION_WHATSAPP_LIMIT:
-                # Caso ideal (Texto corto): Redirección limpia mediante link
-                url_wa = f"https://api.whatsapp.com/send?text={quote(texto_enviar)}"
-                st.markdown(f"""
-                    <a href="{url_wa}" target="_blank" style="text-decoration: none;">
-                        <button style="background-color: {color_bg}; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer;">
-                            📲 {titulo}
-                        </button>
-                    </a>
-                """, unsafe_allow_html=True)
-            else:
-                # Caso crítico (Texto muy largo): Inyección JS invisible para copiar al portapapeles sin romper el diseño
-                texto_escapado = texto_enviar.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
-                
-                # Usamos un session state dinámico por botón para saber si fue pulsado y mostrar el cartelito guía
-                key_estado = f"click_{id_clave}"
-                if key_estado not in st.session_state:
-                    st.session_state[key_estado] = False
-
-                # Botón estético nativo integrado con el portapapeles por medio de st.components o st.button tradicional
-                if st.button(f"📲 {titulo}", key=f"btn_copy_{id_clave}", use_container_width=True):
-                    st.session_state[key_estado] = True
-                    # Script JS temporal inyectado en el cliente para forzar el guardado en memoria instantáneo
-                    st.components.v1.html(f"""
-                        <script>
-                            navigator.clipboard.writeText('{texto_escapado}');
-                        </script>
-                    """, height=0, width=0)
-                
-                # Si el usuario le dio clic, mostramos el cartelito elegante abajo del botón sin deformar nada
-                if st.session_state[key_estado]:
-                    st.success("📋 ¡Copiado automáticamente! Texto muy largo para WhatsApp. Abre tu chat y dale Pegar.")
 
         # Generación de las cadenas de datos
         str_faltan_completo = ", ".join([str(x) for x in sorted(faltan_lista)]) if faltan_lista else "¡Ninguna! Álbum lleno 🥳"
@@ -257,10 +219,63 @@ else:
         str_tengo_completo = ", ".join([str(x) for x in sorted(tengo_lista)]) if tengo_lista else "Ninguna lámina registrada aún."
         txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026*\n\n📋 *Lista:* {str_tengo_completo}"
 
-        # Despliegue en paralelo o cascada idéntica
-        renderizar_boton_inteligente("faltan", "Compartir Faltantes", txt_faltan, "#E74C3C")
-        renderizar_boton_inteligente("repes", "Compartir Repetidas", txt_repes, "#F39C12")
-        renderizar_boton_inteligente("tengo", "Compartir Lo Que Tengo", txt_tengo, "#2ECC71")
+        # --- BOTÓN 1: FALTANTES (CON EVALUACIÓN INTELIGENTE DE COPIADO + COLOR ROJO NATIVO) ---
+        IMPERFECCION_WHATSAPP_LIMIT = 1500 
+        
+        if len(txt_faltan) < IMPERFECCION_WHATSAPP_LIMIT:
+            url_faltan = f"https://api.whatsapp.com/send?text={quote(txt_faltan)}"
+            st.markdown(f"""
+                <a href="{url_faltan}" target="_blank" style="text-decoration: none;">
+                    <button style="background-color: #E74C3C; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">
+                        📲 Enviar Faltantes
+                    </button>
+                </a>
+            """, unsafe_allow_html=True)
+        else:
+            if "click_faltan" not in st.session_state:
+                st.session_state["click_faltan"] = False
+
+            # Inyectamos el estilo para que este botón de copia mantenga el color Rojo Vivo idéntico
+            st.markdown("""
+                <style>
+                    div.stButton > button[key^="btn_copy_faltan"] {
+                        background-color: #E74C3C !important;
+                        color: white !important;
+                    }
+                </style>
+            """, unsafe_allow_html=True)
+
+            if st.button("📲 Enviar Faltantes", key="btn_copy_faltan", use_container_width=True):
+                st.session_state["click_faltan"] = True
+                texto_escapado = txt_faltan.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+                st.components.v1.html(f"""
+                    <script>
+                        navigator.clipboard.writeText('{texto_escapado}');
+                    </script>
+                """, height=0, width=0)
+            
+            if st.session_state["click_faltan"]:
+                st.success("📋 ¡Listado de Faltantes copiado! Es muy largo para enviarlo automático. Abre tu WhatsApp y dale Pegar.")
+
+        # --- BOTÓN 2: REPETIDAS (100% AUTOMÁTICO DIRECTO) ---
+        url_repes = f"https://api.whatsapp.com/send?text={quote(txt_repes)}"
+        st.markdown(f"""
+            <a href="{url_repes}" target="_blank" style="text-decoration: none;">
+                <button style="background-color: #F39C12; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">
+                    🔁 Enviar Repetidas
+                </button>
+            </a>
+        """, unsafe_allow_html=True)
+
+        # --- BOTÓN 3: LO QUE TENGO (100% AUTOMÁTICO DIRECTO) ---
+        url_tengo = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
+        st.markdown(f"""
+            <a href="{url_tengo}" target="_blank" style="text-decoration: none;">
+                <button style="background-color: #2ECC71; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">
+                    ✅ Enviar Lo Que Tengo
+                </button>
+            </a>
+        """, unsafe_allow_html=True)
 
     # PESTAÑA 2: NAVEGADOR DE LÁMINAS
     with menu_principal[1]:
@@ -314,7 +329,7 @@ else:
                 st.write("---")
                 modo_click = "➕ Incrementar (+1)"
                 if st.session_state["modo_rol"] == "admin":
-                    modo_click = st.radio("👇 Elige la acción para el toque de los cuadritos:", ["➕ Incrementar (+1)", "➖ Decrementar (-1)", "🛑 Reiniciar (0)"], horizontal=True)
+                    modo_click = st.radio("👇 Elige la acción para el toque de los cuadritos:", ["➕ Incrementar (+1)", "➖ Decrementar (-1)", "🛑 No la tengo (0)"], horizontal=True)
                 
                 def renderizar_cuadrícula_limpia(df_bloque):
                     columnas_por_fila = 4
@@ -326,13 +341,13 @@ else:
                             id_l = int(lam['id_lamina'])
                             cant_actual = int(lam['cantidad'])
                             if cant_actual == 0:
-                                label_render = f"🛑 {id_l}\nFalta"
+                                label_render = f"🛑 {id_l} Falta"
                                 wrapper_class = "lamina-falta"
                             elif cant_actual == 1:
-                                label_render = f"✅ {id_l}\nTengo"
+                                label_render = f"✅ {id_l} Tengo"
                                 wrapper_class = "lamina-tengo"
                             else:
-                                label_render = f"🔁 {id_l}\n(x{cant_actual})"
+                                label_render = f"🔁 {id_l} (x{cant_actual})"
                                 wrapper_class = "lamina-repetida"
                                 
                             with columnas_st[idx_col]:
@@ -355,6 +370,8 @@ else:
                 st.write("---")
                 df_pc_visual = df_pagina_view.copy()
                 df_pc_visual['Estado Actual'] = df_pc_visual['cantidad'].apply(lambda c: "🔴 Falta" if c == 0 else ("🟢 Tengo" if c == 1 else f"🟠 Repetida (x{c})"))
+                
+                # Se renombran las columnas originales mapeando de forma segura para evitar el KeyError
                 df_pc_visual = df_pc_visual.rename(columns={'id_lamina': 'No.', 'equipo': 'Equipo', 'pagina': 'Pag.', 'cantidad': 'Cantidad'})
                 df_pc_final = df_pc_visual[['No.', 'Equipo', 'Pag.', 'Estado Actual', 'Cantidad']]
 
