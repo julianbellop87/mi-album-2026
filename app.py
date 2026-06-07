@@ -179,7 +179,13 @@ def procesar_lista_intercambio_multi_transito(id_intercambio, texto_input, tipo_
     if not texto_input.strip():
         return [], []
     
-    tokens = [t.strip() for t in texto_input.replace('\n', ',').split(',') if t.strip().isdigit()]
+    # Estandarizamos separadores: cambiamos saltos de línea y guiones por comas
+    texto_limpio = texto_input.replace('\n', ',').replace('-', ',')
+    # Reemplazamos las comas por espacios para usar split() de manera limpia
+    texto_limpio = texto_limpio.replace(',', ' ')
+    
+    # El split sin argumentos divide por cualquier cantidad o tipo de espacios en blanco
+    tokens = [t.strip() for t in texto_limpio.split() if t.strip().isdigit()]
     numeros_procesar = [int(t) for t in tokens]
     
     exitosos = []
@@ -199,7 +205,6 @@ def procesar_lista_intercambio_multi_transito(id_intercambio, texto_input, tipo_
             if trans['tipo'] == 'entrar':
                 df_album_actual.loc[idx_t, 'cantidad'] += 1
             elif trans['tipo'] == 'salir':
-                # CORRECCIÓN 1: clip(lower=0) en vez de max()
                 df_album_actual.loc[idx_t, 'cantidad'] = (df_album_actual.loc[idx_t, 'cantidad'] - 1).clip(lower=0)
 
     for num in numeros_procesar:
@@ -252,7 +257,7 @@ def aplicar_intercambio_especifico_bd(id_intercambio):
         cur.close()
         conn.close()
         st.session_state["df_album"] = df_local
-        st.success(f"¡Intercambio #{id_intercambio} applied de forma permanente en la nube!")
+        st.success(f"¡Intercambio #{id_intercambio} aplicado de forma permanente en la nube!")
     except Exception as e:
         st.error(f"Error al aplicar intercambio: {e}")
 
@@ -316,7 +321,6 @@ else:
             if trans['tipo'] == 'entrar':
                 df_proyectado.loc[idx_p, 'cantidad'] += 1
             elif trans['tipo'] == 'salir':
-                # CORRECCIÓN 2: clip(lower=0) en vez de max()
                 df_proyectado.loc[idx_p, 'cantidad'] = (df_proyectado.loc[idx_p, 'cantidad'] - 1).clip(lower=0)
 
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "🔄 Intercambios", "📊 Porcentajes de Llenado"])
@@ -548,7 +552,7 @@ else:
             col_int1, col_int2 = st.columns(2)
             with col_int1:
                 st.markdown("<b style='color:#2ECC71;'>📥 INGRESAR</b>", unsafe_allow_html=True)
-                txt_entrar = st.text_area("Números a entrar:", value="", placeholder="Ej: 5, 12", key="area_entrar_m", height=100)
+                txt_entrar = st.text_area("Números a entrar:", value="", placeholder="Ej: 5-12, 6, 18", key="area_entrar_m", height=100)
                 if st.button("📥 Registrar Entrada", use_container_width=True):
                     ok, bad = procesar_lista_intercambio_multi_transito(id_actual_intercambio, txt_entrar, "entrar")
                     if ok: st.success(f"En Tránsito #{id_actual_intercambio}: {', '.join(map(str, ok))}")
@@ -558,7 +562,7 @@ else:
             
             with col_int2:
                 st.markdown("<b style='color:#F39C12;'>📤 SACAR</b>", unsafe_allow_html=True)
-                txt_sacar = st.text_area("Números a sacar:", value="", placeholder="Ej: 6, 17", key="area_sacar_m", height=100)
+                txt_sacar = st.text_area("Números a sacar:", value="", placeholder="Ej: 6-17 22, 34", key="area_sacar_m", height=100)
                 if st.button("📤 Registrar Salida", use_container_width=True):
                     ok, bad = procesar_lista_intercambio_multi_transito(id_actual_intercambio, txt_sacar, "salir")
                     if ok: st.success(f"En Tránsito #{id_actual_intercambio}: {', '.join(map(str, ok))}")
