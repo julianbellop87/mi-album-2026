@@ -29,17 +29,17 @@ st.html("""
         font-weight: bold !important;
         transition: transform 0.1s ease !important;
         border: none !important;
-        padding-top: 2px !important;
-        padding-bottom: 2px !important;
+        padding-top: 4px !important;
+        padding-bottom: 4px !important;
         margin-top: 0px !important;
         margin-bottom: 0px !important;
-        height: 52px !important;
-        min-height: 52px !important;
+        height: 56px !important;
+        min-height: 56px !important;
         display: flex !important;
         flex-direction: column !important;
         align-items: center !important;
         justify-content: center !important;
-        line-height: 1.1 !important;
+        line-height: 1.2 !important;
         font-size: 13px !important;
     }
     div.stButton > button:active {
@@ -47,7 +47,7 @@ st.html("""
     }
     
     /* Clase Falta */
-    div.lamina-alta > div > div > button {
+    div.lamina-falta > div > div > button {
         background-color: #FADBD8 !important;
         color: #78281F !important;
     }
@@ -96,7 +96,7 @@ if "df_album" not in st.session_state:
         if registros_en_bd == 0:
             for _, fila in df_excel.iterrows():
                 cur.execute("""
-                    INSERT INTO album_2026 (id_lamina, equipo, group, descripcion, pagina, cantidad)
+                    INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
                     VALUES (%s, %s, %s, %s, %s, 0);
                 """, (int(fila['Laminas']), str(fila['Equipo']).strip(), str(fila['Grupo']).strip(), str(fila['Descripicion']).strip(), int(fila['Pagina'])))
             conn.commit()
@@ -311,14 +311,17 @@ else:
                         for idx_col, (_, lam) in enumerate(sub_df.iterrows()):
                             id_l = int(lam['id_lamina'])
                             cant_actual = int(lam['cantidad'])
+                            desc_l = str(lam['descripcion'])
+                            
+                            # Construcción de etiqueta limpia con Salto de Línea y la Descripción
                             if cant_actual == 0:
-                                label_render = f"🛑 {id_l} Falta"
+                                label_render = f"🛑 {id_l}\n{desc_l}"
                                 wrapper_class = "lamina-falta"
                             elif cant_actual == 1:
-                                label_render = f"✅ {id_l} Tengo"
+                                label_render = f"✅ {id_l}\n{desc_l}"
                                 wrapper_class = "lamina-tengo"
                             else:
-                                label_render = f"🔁 {id_l} (x{cant_actual})"
+                                label_render = f"🔁 {id_l} (x{cant_actual})\n{desc_l}"
                                 wrapper_class = "lamina-repetida"
                                 
                             with columnas_st[idx_col]:
@@ -331,12 +334,10 @@ else:
                                     st.html("</div>")
 
                 if seleccion_combo == "Ver Todo el Álbum (735 Láminas)" and buscar_equipo == "Todos los Equipos":
-                    # --- VISTA AGRUPADA DINÁMICA CON DATOS ABREVIADOS Y CONTEO (TENGO/TOTAL) ---
                     for (pag, eq, gr), df_eq_sub in df_pagina_view.groupby(['pagina', 'equipo', 'grupo'], sort=False):
                         total_seccion = len(df_eq_sub)
                         tengo_seccion = df_eq_sub[df_eq_sub['cantidad'] > 0]['id_lamina'].count()
                         
-                        # Título formateado compacto: EQUIPO - Gr. X - Pág. Y (Tengo/Total)
                         titulo_expander = f"⚽ {eq} — Gr. {gr} — Pág. {pag} ({tengo_seccion}/{total_seccion})"
                         
                         with st.expander(titulo_expander, expanded=True):
