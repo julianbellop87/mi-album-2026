@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 import psycopg2
 from urllib.parse import quote
 import pandas as pd
@@ -7,19 +7,28 @@ import os
 # 1. CONFIGURACIÓN DE PÁGINA ESENCIAL
 st.set_page_config(page_title="Mi Álbum 2026", layout="centered")
 
-# --- ESTILOS CSS PERSONALIZADOS PARA COLORES DE LÁMINAS ---
+# --- ESTILOS CSS PERSONALIZADOS (AHORA ULTRA COMPACTOS) ---
 st.html("""
 <style>
+    /* Reduce el espacio vertical entre elementos consecutivos de Streamlit */
+    [data-testid="stVerticalBlock"] {
+        gap: 0.3rem !important;
+    }
+    
     /* Estilos globales para botones de láminas */
     div.stButton > button {
         border-radius: 8px !important;
         font-weight: bold !important;
         transition: transform 0.1s ease !important;
         border: none !important;
+        padding-top: 6px !important;
+        padding-bottom: 6px !important;
+        margin-bottom: 2px !important;
     }
     div.stButton > button:active {
         transform: scale(0.95) !important;
     }
+    
     /* Clase Falta: Rojo Suave */
     div.lamina-falta > div > div > button {
         background-color: #FADBD8 !important;
@@ -73,7 +82,7 @@ if "df_album" not in st.session_state:
         if registros_en_bd == 0:
             for _, fila in df_excel.iterrows():
                 cur.execute("""
-                    INSERT INTO album_2026 (id_lamina, equipo, groupo, descripcion, pagina, cantidad)
+                    INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
                     VALUES (%s, %s, %s, %s, %s, 0);
                 """, (
                     int(fila['Laminas']), 
@@ -126,23 +135,21 @@ def guardar_lamina_en_bd(id_lamina, nueva_cantidad):
         st.error(f"Error al sincronizar cambio en la nube: {e}")
 
 
-# --- CALLBACK DE ACCIÓN DIRECTA (PROCESA LOCAL Y GUARDA EN BD AL TIEMPO) ---
+# --- CALLBACK DE ACCIÓN DIRECTA ---
 def ejecutar_accion_lamina(id_lamina, modo_accion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
         actual = int(st.session_state["df_album"].loc[idx, 'cantidad'].values[0])
         nueva_cant = actual
         
-        if modo_accion == "➕ Incrementar (+1)":
+        if "➕" in modo_accion:
             nueva_cant = actual + 1
-        elif modo_accion == "➖ Decrementar (-1)" and actual > 0:
+        elif "➖" in modo_accion and actual > 0:
             nueva_cant = actual - 1
-        elif modo_accion == "🗑️ Reiniciar (0)":
+        elif "🛑" in modo_accion:
             nueva_cant = 0
             
-        # Actualiza memoria local
         st.session_state["df_album"].loc[idx, 'cantidad'] = nueva_cant
-        # Guarda directamente en Postgres sin intermediarios
         guardar_lamina_en_bd(id_lamina, nueva_cant)
 
 
@@ -243,7 +250,6 @@ else:
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
         
-        # Selector de Interfaz de Carga
         modo_vista = st.radio(
             "Selecciona la interfaz de carga:",
             ["Opcion 1: Vista Individual 📱", "Opcion 2: Vista Tabla (PC masiva) 💻"],
@@ -277,7 +283,6 @@ else:
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        # Aplicación de filtros
         df_pagina_view = df_nav.copy()
         
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
@@ -308,21 +313,20 @@ else:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
             # ==========================================================
-            # OPCIÓN 1: INTERFAZ MÓVIL (MATRIZ COMPACTA DE PINTADO NATIVO)
+            # OPCIÓN 1: INTERFAZ MÓVIL (MATRIZ ULTRA COMPACTA)
             # ==========================================================
             if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
                 
-                # Selector de acción superior
+                # Selector de acción superior modificado según tus indicaciones
                 modo_click = "➕ Incrementar (+1)"
                 if st.session_state["modo_rol"] == "admin":
                     modo_click = st.radio(
                         "👇 Elige la acción para el toque de los cuadritos:",
-                        ["➕ Incrementar (+1)", "➖ Decrementar (-1)", "🗑️ Reiniciar (0)"],
+                        ["➕ Incrementar (+1)", "➖ Decrementar (-1)", "🛑 No la tengo (0)"],
                         horizontal=True
                     )
                 
-                # Renderizador de cuadrícula aplicando contenedores CSS dinámicos
                 def renderizar_cuadrícula_limpia(df_bloque):
                     columnas_por_fila = 4
                     total_bloque = len(df_bloque)
@@ -335,7 +339,6 @@ else:
                             id_l = int(lam['id_lamina'])
                             cant_actual = int(lam['cantidad'])
                             
-                            # Asignación de etiquetas y contenedores CSS según volumen de láminas
                             if cant_actual == 0:
                                 label_render = f"🛑 {id_l}\nFalta"
                                 wrapper_class = "lamina-falta"
@@ -347,7 +350,6 @@ else:
                                 wrapper_class = "lamina-repetida"
                                 
                             with columnas_st[idx_col]:
-                                # El contenedor div fuerza el estilo CSS inyectado arriba
                                 with st.container(key=f"wrap_{id_l}"):
                                     st.html(f"<div class='{wrapper_class}'>")
                                     if st.session_state["modo_rol"] == "admin":
@@ -362,7 +364,6 @@ else:
                                         st.button(label_render, key=f"btn_view_{id_l}", disabled=True, use_container_width=True)
                                     st.html("</div>")
 
-                # Agrupación dinámica por Equipos/Selecciones cuando se ve todo el álbum
                 if seleccion_combo == "Ver Todo el Álbum (735 Láminas)" and buscar_equipo == "Todos los Equipos":
                     equipos_unicos = df_pagina_view['equipo'].unique()
                     for eq in equipos_unicos:
