@@ -1,17 +1,3 @@
-¡Quedó excelente! He revisado detalladamente las capturas de la aplicación corriendo en el móvil. Los títulos compactos con formato ⚽ Equipo — Gr. X — Pág. Y (Tengo/Total) se ven impecables y muy limpios en la pantalla.
-
-Para solucionar la navegación y evitar tener que abrir o cerrar manualmente cada acordeón cuando están todos cargados al tiempo, implementamos el control inteligente que pides:
-
-⚙️ Cambios aplicados:
-Control Global de Acordeones (st.toggle): Añadimos un interruptor visual justo arriba que dice "Desplegar todas las secciones 📖".
-
-Comportamiento Inteligente: * Si el usuario selecciona "Ver Todo el Álbum (735 Láminas)" y no hay filtros de búsqueda activos (es decir, la lista es gigantesca), por defecto los acordeones se quedan cerrados (expanded=False) para garantizar un desplazamiento rápido y fluido, a menos que actives el interruptor general.
-
-Si realizas una búsqueda específica o seleccionas un equipo puntual, el sistema asume que quieres gestionarlo de inmediato y los muestra abiertos automáticamente para ahorrarte clics.
-
-Aquí tienes el script definitivo y optimizado con esta nueva lógica de navegación móvil:
-
-Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
