@@ -12,46 +12,75 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🚀 REGLA DE ORO: EL EXCEL TIENE EL CONTROL ABSOLUTO ---
+# --- 🚀 RECONSTRUCCIÓN TOTAL: EL EXCEL MANDA Y BORRA EL PASADO ---
 if "df_album" not in st.session_state:
     archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     
     try:
-        # 1. Cargar tu archivo Excel original
+        # 1. Leer el archivo Excel tal cual lo tenés configurado
         df_excel = pd.read_excel(archivo_excel)
         df_excel['Laminas'] = df_excel['Laminas'].astype(int)
         df_excel['Pagina'] = df_excel['Pagina'].astype(int)
         
-        # 2. Traer ÚNICAMENTE las cantidades de la base de datos
+        # 2. Forzar limpieza en Postgres: Borramos la estructura vieja y conflictiva
         conn = get_connection()
-        df_bd = pd.read_sql_query("SELECT id_lamina, cantidad FROM album_2026;", conn)
+        cur = conn.cursor()
+        
+        # ¡BORRÓN Y CUENTA NUEVA EXPLICITO!
+        cur.execute("DROP TABLE IF EXISTS album_2026 CASCADE;")
+        
+        # Creamos la tabla limpia con la estructura real
+        cur.execute("""
+            CREATE TABLE album_2026 (
+                id_lamina INT PRIMARY KEY,
+                equipo VARCHAR(100),
+                grupo VARCHAR(50),
+                descripcion VARCHAR(150),
+                pagina INT,
+                cantidad INT DEFAULT 0
+            );
+        """)
+        
+        # Insertar los datos limpios respetando el orden e índices consecutivos del Excel
+        for _, fila in df_excel.iterrows():
+            cur.execute("""
+                INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
+                VALUES (%s, %s, %s, %s, %s, 0);
+            """, (
+                int(fila['Laminas']), 
+                str(fila['Equipo']).strip(), 
+                str(fila['Grupo']).strip(), 
+                str(fila['Descripicion']).strip(), 
+                int(fila['Pagina'])
+            ))
+        
+        conn.commit()
+        cur.close()
         conn.close()
-        df_bd['id_lamina'] = df_bd['id_lamina'].astype(int)
-        df_bd['cantidad'] = df_bd['cantidad'].astype(int)
+        
+        # Inicializar el estado de la aplicación en ceros pero con la paginación impecable
+        df_final = pd.DataFrame()
+        df_final['id_lamina'] = df_excel['Laminas']
+        df_final['equipo'] = df_excel['Equipo'].astype(str).str.strip()
+        df_final['grupo'] = df_excel['Grupo'].astype(str).str.strip()
+        df_final['descripcion'] = df_excel['Descripicion'].astype(str).str.strip()
+        df_final['pagina'] = df_excel['Pagina'].astype(int)
+        df_final['cantidad'] = 0
+        
+        st.session_state["df_album"] = df_final.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
         
     except Exception as e:
-        df_bd = pd.DataFrame(columns=['id_lamina', 'cantidad'])
-
-    # 3. Cruzar datos garantizando que la paginación del Excel destruya cualquier dato viejo
-    df_unido = pd.merge(
-        df_excel, df_bd, 
-        left_on='Laminas', right_on='id_lamina', 
-        how='left'
-    )
-    
-    df_unido['cantidad'] = df_unido['cantidad'].fillna(0).astype(int)
-    
-    # Mapeo limpio usando estrictamente las columnas de tu archivo
-    df_final = pd.DataFrame()
-    df_final['id_lamina'] = df_unido['Laminas']
-    df_final['equipo'] = df_unido['Equipo'].astype(str).str.strip()
-    df_final['grupo'] = df_unido['Grupo'].astype(str).str.strip()
-    df_final['descripcion'] = df_unido['Descripicion'].astype(str).str.strip()
-    df_final['pagina'] = df_unido['Pagina'].astype(int)
-    df_final['cantidad'] = df_unido['cantidad']
-    
-    # Guardar en memoria ordenando del 1 al 735 de forma consecutiva
-    st.session_state["df_album"] = df_final.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
+        st.error(f"Error crítico en la inicialización: {e}")
+        # Fallback de emergencia
+        if 'df_excel' in locals():
+            df_final = pd.DataFrame()
+            df_final['id_lamina'] = df_excel['Laminas']
+            df_final['equipo'] = df_excel['Equipo'].astype(str).str.strip()
+            df_final['grupo'] = df_excel['Grupo'].astype(str).str.strip()
+            df_final['descripcion'] = df_excel['Descripicion'].astype(str).str.strip()
+            df_final['pagina'] = df_excel['Pagina'].astype(int)
+            df_final['cantidad'] = 0
+            st.session_state["df_album"] = df_final
 
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
@@ -61,7 +90,7 @@ if "tiene_cambios" not in st.session_state:
 def registrar_cambio_local(id_lamina, operacion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
-        actual = int(st.session_state["df_album"].loc[idx, 'whitespace_count'].values[0]) if 'whitespace_count' in st.session_state["df_album"] else int(st.session_state["df_album"].loc[idx, 'cantidad'].values[0])
+        actual = int(st.session_state["df_album"].loc[idx, 'cantidad'].values[0])
         if operacion == "sumar":
             st.session_state["df_album"].loc[idx, 'cantidad'] = actual + 1
             st.session_state["tiene_cambios"] = True
@@ -76,23 +105,12 @@ def forzar_sincronizacion_bd():
             conn = get_connection()
             cur = conn.cursor()
             
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS album_2026 (
-                    id_lamina INT PRIMARY KEY,
-                    equipo VARCHAR(100),
-                    grupo VARCHAR(50),
-                    descripcion VARCHAR(150),
-                    pagina INT,
-                    cantidad INT DEFAULT 0
-                );
-            """)
-            
             for _, fila in st.session_state["df_album"].iterrows():
                 cur.execute("""
                     INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id_lamina) 
-                    DO UPDATE SET cantidad = EXCLUDED.cantidad, pagina = EXCLUDED.pagina, equipo = EXCLUDED.equipo;
+                    DO UPDATE SET cantidad = EXCLUDED.cantidad;
                 """, (
                     int(fila['id_lamina']), 
                     str(fila['equipo']), 
@@ -200,7 +218,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR (CORREGIDA SIN VARIABLES FANTASMAS)
+    # PESTAÑA 2: NAVEGADOR
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -236,7 +254,6 @@ else:
                 paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())]
                 buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
 
-        # Agrupación por orden estricto del archivo de llegada
         secciones_unicas = df_nav.groupby(['pagina', 'equipo', 'grupo'], sort=False).size().reset_index()
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"]
         for _, r in secciones_unicas.iterrows():
@@ -248,7 +265,6 @@ else:
 
         df_pagina_view = df_nav.copy()
         
-        # Filtro estricto cruzando página y nombre de equipo
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
             partes = seleccion_combo.split(" - ")
             pag_real = int(partes[0].replace("Pág. ", "").strip())
@@ -268,7 +284,6 @@ else:
         if buscar_por_pagina != "Todas las Páginas":
             df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
 
-        # CORRECCIÓN DE FILTROS: Uso estricto de la columna 'cantidad'
         if filtro_inventario == "Solo Faltantes 🚨":
             df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
         elif filtro_inventario == "Solo las que Tengo ✅":
