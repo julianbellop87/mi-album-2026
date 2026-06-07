@@ -25,7 +25,7 @@ st.html("""
         padding: 0px !important;
     }
 
-    /* Estilos globales para botones de láminas (Altura fija estricta para evitar desalineaciones) */
+    /* Estilos globales para botones de láminas */
     div.stButton > button {
         border-radius: 6px !important;
         font-weight: bold !important;
@@ -35,7 +35,7 @@ st.html("""
         padding-bottom: 2px !important;
         margin-top: 0px !important;
         margin-bottom: 0px !important;
-        height: 52px !important; /* Mantiene la misma altura en todas las láminas */
+        height: 52px !important;
         min-height: 52px !important;
         display: flex !important;
         flex-direction: column !important;
@@ -71,7 +71,7 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🔒 FLUJO SEGURO ---
+# --- 🔒 FLUJO SEGURO DE DATOS ---
 if "df_album" not in st.session_state:
     archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
     
@@ -165,7 +165,7 @@ def ejecutar_accion_lamina(id_lamina, modo_accion):
             nueva_cant = actual + 1
         elif "➖" in modo_accion and actual > 0:
             nueva_cant = actual - 1
-        elif "🛑" in modo_accion or "No la tengo" in modo_accion:
+        elif "🛑" in modo_accion or "No la tengo" in modo_accion or "Reiniciar" in modo_accion:
             nueva_cant = 0
             
         st.session_state["df_album"].loc[idx, 'cantidad'] = nueva_cant
@@ -224,8 +224,6 @@ else:
 
         tengo_lista = df_gen[df_gen['cantidad'] > 0]['id_lamina'].tolist()
         faltan_lista = df_gen[df_gen['cantidad'] == 0]['id_lamina'].tolist()
-        
-        # Diccionario para formatear las repetidas detalladamente
         repes_dict = df_gen[df_gen['cantidad'] > 1].set_index('id_lamina')['es_repetida'].to_dict()
 
         total_laminas = len(df_gen)
@@ -246,46 +244,34 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("<h6 style='text-align: center;'>📋 Generar Listados Completos (Uno a Uno)</h6>", unsafe_allow_html=True)
-        st.info("Haz clic en 'Copiar Listado' y pégalo directamente en tu chat de WhatsApp. ¡Así se envían completos sin importar el largo!")
+        st.markdown("<h6 style='text-align: center; margin-bottom: 10px;'>📲 Compartir Listados Consecutivos (Uno a Uno)</h6>", unsafe_allow_html=True)
 
-        # --- 1. BOTÓN DE FALTANTES (COMPLETO) ---
+        # --- FUNCIÓN LOGÍSTICA INTELIGENTE DE ENVÍO ---
+        def renderizar_modulo_envio(titulo_seccion, texto_completo, color_hex):
+            # Si el texto es corto, se habilita el enlace directo nativo de WhatsApp
+            if len(texto_completo) < 1500:
+                link_wa = f"https://api.whatsapp.com/send?text={quote(texto_completo)}"
+                st.markdown(f'<a href="{link_wa}" target="_blank"><button style="background-color:{color_hex};color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;width:100%;margin-bottom:12px;">📲 {titulo_seccion} (Envío Automático)</button></a>', unsafe_allow_html=True)
+            else:
+                # Si es muy largo, se despliega el contenedor seguro con botón superior de copia
+                st.markdown(f"<b style='color:{color_hex}; font-size:13px;'>📋 {titulo_seccion} (Muy largo - Copia aquí abajo 👇):</b>", unsafe_allow_html=True)
+                st.code(texto_completo, language="text")
+
+        # 1. Módulo Faltantes
         str_faltan_completo = ", ".join([str(x) for x in sorted(faltan_lista)]) if faltan_lista else "¡Ninguna! Álbum lleno 🥳"
-        txt_faltan = f"*🚨 MIS FALTANTES - ÁLBUM 2026* 🏆\n\nProgreso: {progreso_gen:.1f}% ({total_tengo}/{total_laminas})\n\n📋 *Faltan las siguientes láminas:*\n{str_faltan_completo}"
-        
-        col_f_btn, col_f_cp = st.columns([3.5, 1.5])
-        with col_f_btn:
-            link_f = f"https://api.whatsapp.com/send?text={quote(txt_faltan[:1500] + '... (Usa el botón Copiar para el texto completo)')}"
-            st.markdown(f'<a href="{link_f}" target="_blank"><button style="background-color:#E74C3C;color:white;border:none;padding:8px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">📲 Enviar Faltantes</button></a>', unsafe_allow_html=True)
-        with col_f_cp:
-            st.copy_text_button("📋 Copiar Listado", text=txt_faltan, use_container_width=True)
+        txt_faltan = f"*🚨 MIS FALTANTES - ÁLBUM 2026*\n\nProgreso: {progreso_gen:.1f}%\n\n📋 *Lista:* {str_faltan_completo}"
+        renderizar_modulo_envio("Compartir Faltantes", txt_faltan, "#E74C3C")
 
-        st.write("")
-
-        # --- 2. BOTÓN DE REPETIDAS (COMPLETO) ---
+        # 2. Módulo Repetidas
         lista_repes_format = [f"{k}(x{v})" for k, v in sorted(repes_dict.items())]
         str_repes_completo = ", ".join(lista_repes_format) if lista_repes_format else "Ninguna por ahora 👍"
-        txt_repes = f"*🔁 MIS REPETIDAS - ÁLBUM 2026* 🏆\n\nTengo {total_repes} repetidas:\n\n{str_repes_completo}"
-        
-        col_r_btn, col_r_cp = st.columns([3.5, 1.5])
-        with col_r_btn:
-            link_r = f"https://api.whatsapp.com/send?text={quote(txt_repes[:1500] + '... (Usa el botón Copiar para el texto completo)')}"
-            st.markdown(f'<a href="{link_r}" target="_blank"><button style="background-color:#F39C12;color:white;border:none;padding:8px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">📲 Enviar Repetidas</button></a>', unsafe_allow_html=True)
-        with col_r_cp:
-            st.copy_text_button("📋 Copiar Listado", text=txt_repes, use_container_width=True)
+        txt_repes = f"*🔁 MIS REPETIDAS - ÁLBUM 2026*\n\n📋 *Lista:* {str_repes_completo}"
+        renderizar_modulo_envio("Compartir Repetidas", txt_repes, "#F39C12")
 
-        st.write("")
-
-        # --- 3. BOTÓN DE LO QUE TENGO (COMPLETO) ---
+        # 3. Módulo Lo Que Tengo
         str_tengo_completo = ", ".join([str(x) for x in sorted(tengo_lista)]) if tengo_lista else "Ninguna lámina registrada aún."
-        txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026* 🏆\n\nMis láminas pegadas:\n\n{str_tengo_completo}"
-        
-        col_t_btn, col_t_cp = st.columns([3.5, 1.5])
-        with col_t_btn:
-            link_t = f"https://api.whatsapp.com/send?text={quote(txt_tengo[:1500] + '... (Usa el botón Copiar para el texto completo)')}"
-            st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:8px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">📲 Enviar Lo Que Tengo</button></a>', unsafe_allow_html=True)
-        with col_t_cp:
-            st.copy_text_button("📋 Copiar Listado", text=txt_tengo, use_container_width=True)
+        txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026*\n\n📋 *Lista:* {str_tengo_completo}"
+        renderizar_modulo_envio("Compartir Lo Que Tengo", txt_tengo, "#2ECC71")
 
 
     # PESTAÑA 2: NAVEGADOR DE LÁMINAS
@@ -360,7 +346,7 @@ else:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
             # ==========================================================
-            # OPCIÓN 1: INTERFAZ MÓVIL (MATRIZ ULTRA COMPACTA ALINEADA)
+            # OPCIÓN 1: INTERFAZ MÓVIL
             # ==========================================================
             if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
@@ -369,7 +355,7 @@ else:
                 if st.session_state["modo_rol"] == "admin":
                     modo_click = st.radio(
                         "👇 Elige la acción para el toque de los cuadritos:",
-                        ["➕ Incrementar (+1)", "➖ Decrementar (-1)", "🛑 No la tengo (0)"],
+                        ["➕ Incrementar (+1)", "➖ Decrementar (-1)", "🛑 Reiniciar (0)"],
                         horizontal=True
                     )
                 
@@ -422,11 +408,12 @@ else:
                 st.markdown("<br>", unsafe_allow_html=True)
             
             # ==========================================================
-            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA (PC)
+            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA CORREGIDA (PC)
             # ==========================================================
             else:
                 st.write("---")
-                df_ultra_reducido_pc = df_pagina_view[['id_lamina', 'equipo', 'pagina', 'cantidad']].copy()
+                # Clonamos y preparamos las columnas visuales de forma segura sin romper índices
+                df_pc_visual = df_pagina_view.copy()
                 
                 def mapear_estado_visual(cant):
                     if cant == 0:
@@ -436,34 +423,42 @@ else:
                     else:
                         return f"🟠 Repetida (x{cant})"
                         
-                df_ultra_reducido_pc['Estado'] = df_ultra_reducido_pc['cantidad'].apply(mapear_estado_visual)
-                df_ultra_reducido_pc = df_ultra_reducido_pc.rename(columns={'id_lamina': 'No.', 'pagina': 'Pag.'})
+                df_pc_visual['Estado Actual'] = df_pc_visual['cantidad'].apply(mapear_estado_visual)
                 
-                df_ultra_reducido_pc = df_ultra_reducido_pc[['No.', 'equipo', 'Pag.', 'Estado', 'cantidad']]
-                df_ultra_reducido_pc.columns = ['No.', '⚽ Equipo', 'Pag.', 'Estado Actual', '🔢 Cantidad']
+                # Renombramos explícitamente estructurando el dataframe
+                df_pc_visual = df_pc_visual.rename(columns={
+                    'id_lamina': 'No.',
+                    'equipo': 'Equipo',
+                    'pagina': 'Pag.',
+                    'cantidad': 'Cantidad'
+                })
+                
+                # Filtramos las columnas que se van a mostrar en pantalla
+                df_pc_final = df_pc_visual[['No.', 'Equipo', 'Pag.', 'Estado Actual', 'Cantidad']]
 
                 config_columnas_pc = {
-                    "No.": st.column_config.NumberColumn("No.", format="%d", pinned=True, width=50),
-                    "⚽ Equipo": st.column_config.TextColumn("⚽ Equipo", pinned=True, width=150),
-                    "Pag.": st.column_config.NumberColumn("Pag.", format="%d", width=50),
+                    "No.": st.column_config.NumberColumn("No.", format="%d", pinned=True, width=60),
+                    "Equipo": st.column_config.TextColumn("⚽ Equipo", pinned=True, width=180),
+                    "Pag.": st.column_config.NumberColumn("Pag.", format="%d", width=60),
                     "Estado Actual": st.column_config.TextColumn("📋 Estado Actual", width=140),
-                    "🔢 Cantidad": st.column_config.NumberColumn("🔢 Editar Cantidad", min_value=0, max_value=99, step=1, required=True, width=110),
+                    "Cantidad": st.column_config.NumberColumn("🔢 Editar Cantidad", min_value=0, max_value=99, step=1, required=True, width=120),
                 }
 
                 if st.session_state["modo_rol"] == "admin":
                     tabla_editada = st.data_editor(
-                        df_ultra_reducido_pc,
+                        df_pc_final,
                         column_config=config_columnas_pc,
                         hide_index=True,
                         use_container_width=True,
-                        disabled=["No.", "⚽ Equipo", "Pag.", "Estado Actual"],
+                        disabled=["No.", "Equipo", "Pag.", "Estado Actual"],
                         key="editor_masivo_pc"
                     )
                     
-                    if not tabla_editada['🔢 Cantidad'].equals(df_ultra_reducido_pc['🔢 Cantidad']):
+                    # Verificamos si hubo cambios en la columna de cantidad
+                    if not tabla_editada['Cantidad'].equals(df_pc_final['Cantidad']):
                         for idx, fila in tabla_editada.iterrows():
                             id_l = int(fila['No.'])
-                            nueva_cant = int(fila['🔢 Cantidad'])
+                            nueva_cant = int(fila['Cantidad'])
                             
                             idx_original = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_l].index
                             if not idx_original.empty:
@@ -474,7 +469,7 @@ else:
                         st.rerun()
                 else:
                     st.dataframe(
-                        df_ultra_reducido_pc.drop(columns=['🔢 Cantidad']),
+                        df_pc_final.drop(columns=['Cantidad']),
                         column_config=config_columnas_pc,
                         hide_index=True,
                         use_container_width=True
