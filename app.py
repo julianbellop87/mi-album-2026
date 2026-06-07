@@ -1,8 +1,3 @@
-¡Hágale de una, Julián! Aquí tenés el script completo con la estructura condicional corregida (para que no se mezclen las vistas) y con la tabla masiva de PC optimizada con columnas congeladas (pinned=True) y tamaños más compactos.
-
-Copiá todo este código y reemplazá por completo tu app.py:
-
-Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
