@@ -1,4 +1,4 @@
-Aquí tienes el script completo y corregido. He solucionado el problema en la Pestaña 2 (Navegador de Láminas) para que el filtro cruzado funcione a la perfección: cuando tienes seleccionada la opción global "Ver Todo el Álbum (735 Láminas)", pero usas los buscadores para seleccionar el Equipo A y/o el Equipo B, la aplicación ya no se enloquece con los desplegables (st.expander) vacíos, sino que te muestra directamente en la raíz los cuadritos de las láminas de esos países.  Pythonimport streamlit as st
+import streamlit as st
 import psycopg2
 from urllib.parse import quote
 import pandas as pd
