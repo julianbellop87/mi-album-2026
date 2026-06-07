@@ -1,3 +1,8 @@
+¡Hágale de una, Julián! Aquí tenés el script completo con la estructura condicional corregida (para que no se mezclen las vistas) y con la tabla masiva de PC optimizada con columnas congeladas (pinned=True) y tamaños más compactos.
+
+Copiá todo este código y reemplazá por completo tu app.py:
+
+Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
@@ -42,9 +47,6 @@ if "df_album" not in st.session_state:
         if registros_en_bd == 0:
             for _, fila in df_excel.iterrows():
                 cur.execute("""
-                    INSERT INTO album_2026 (id_lamina, equipo, group_name, descripcion, pagina, cantidad)
-                    VALUES (%s, %s, %s, %s, %s, 0);
-                """ if 'group_name' in df_excel.columns else """
                     INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
                     VALUES (%s, %s, %s, %s, %s, 0);
                 """, (
@@ -216,7 +218,7 @@ else:
         st.markdown(f'<a href="{link_t}" target="_blank"><button style="background-color:#2ECC71;color:white;border:none;padding:10px;border-radius:5px;cursor:pointer;font-weight:bold;width:100%;">✅ Compartir Lo Que Tengo</button></a>', unsafe_allow_html=True)
 
 
-    # PESTAÑA 2: NAVEGADOR
+    # PESTAÑA 2: NAVEGADOR DE LÁMINAS
     with menu_principal[1]:
         if st.session_state["modo_rol"] == "consulta":
             st.info("👁️ Modo Consulta Activo.")
@@ -234,7 +236,7 @@ else:
             else:
                 st.info("✅ Todos los datos están guardados y sincronizados.")
         
-        # --- Selector de Interfaces de carga ---
+        # --- Selector Global de Interfaz de Carga ---
         modo_vista = st.radio(
             "Selecciona la interfaz de carga:",
             ["Opcion 1: Vista Individual 📱", "Opcion 2: Vista Tabla (PC masiva) 💻"],
@@ -268,7 +270,7 @@ else:
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
-        # Aplicar filtros
+        # Aplicación estricta de filtros sobre el DataFrame temporal
         df_pagina_view = df_nav.copy()
         
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
@@ -299,7 +301,7 @@ else:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
             # ==========================================
-            # CORRECCIÓN AQUÍ: CONDICIONALES EXCLUSIVOS IF/ELSE
+            # OPCIÓN 1: VISTA INDIVIDUAL (MÓVIL)
             # ==========================================
             if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
@@ -331,27 +333,33 @@ else:
                                 
                     st.markdown("<hr style='margin: 4px 0px; border: 0.5px solid #d0d0d0;'>", unsafe_allow_html=True)
             
+            # ==========================================
+            # OPCIÓN 2: VISTA TABLA COMPACTA (PC MASIVA)
+            # ==========================================
             else:
-                # AQUÍ EJECUTA EXCLUSIVAMENTE LA VISTA DE TABLA INTERACTIVA
                 st.write("---")
-                st.markdown("<p style='font-size: 13px; color: #555;'>💡 <b>Tip de velocidad:</b> Modifica los valores directamente en la columna <b>'cantidad'</b> de la tabla. Al terminar, dale clic al botón de arriba para sincronizar todo.</p>", unsafe_allow_html=True)
+                st.markdown("<p style='font-size: 13px; color: #555;'>💡 <b>Tip de velocidad:</b> Modifica las celdas de la columna <b>'Cantidad'</b>. El Número y Equipo se quedarán fijos a la izquierda al desplazarte.</p>", unsafe_allow_html=True)
                 
+                # Configuración optimizada de tamaños y congelación de columnas
+                config_columnas = {
+                    "id_lamina": st.column_config.NumberColumn("Nº Lámina", disabled=True, format="%d", pinned=True, width=70),
+                    "equipo": st.column_config.TextColumn("⚽ Equipo", disabled=True, pinned=True, width=140),
+                    "grupo": st.column_config.TextColumn("🗂️ Grupo", disabled=True, width=90),
+                    "descripcion": st.column_config.TextColumn("📋 Descripción", disabled=True, width=180),
+                    "pagina": st.column_config.NumberColumn("📄 Pág", disabled=True, format="%d", width=60),
+                    "cantidad": st.column_config.NumberColumn("🔢 Cantidad", min_value=0, max_value=99, step=1, required=True, width=90),
+                }
+
                 if st.session_state["modo_rol"] == "admin":
                     tabla_editada = st.data_editor(
                         df_pagina_view,
-                        column_config={
-                            "id_lamina": st.column_config.NumberColumn("Nº Lámina", disabled=True, format="%d"),
-                            "equipo": st.column_config.TextColumn("⚽ Equipo", disabled=True),
-                            "grupo": st.column_config.TextColumn("🗂️ Grupo", disabled=True),
-                            "descripcion": st.column_config.TextColumn("📋 Descripción", disabled=True),
-                            "pagina": st.column_config.NumberColumn("📄 Pág", disabled=True, format="%d"),
-                            "cantidad": st.column_config.NumberColumn("🔢 Cantidad", min_value=0, max_value=99, step=1, required=True),
-                        },
+                        column_config=config_columnas,
                         hide_index=True,
                         use_container_width=True,
                         key="editor_masivo_pc"
                     )
                     
+                    # Sincronización local reactiva de celdas modificadas
                     if not tabla_editada.equals(df_pagina_view):
                         for idx, fila in tabla_editada.iterrows():
                             id_l = int(fila['id_lamina'])
@@ -365,21 +373,15 @@ else:
                                     st.session_state["tiene_cambios"] = True
                         st.rerun()
                 else:
+                    # Modo Consulta hereda la misma visualización compacta y congelada pero bloqueada
                     st.dataframe(
                         df_pagina_view,
-                        column_config={
-                            "id_lamina": st.column_config.NumberColumn("Nº Lámina", format="%d"),
-                            "equipo": "⚽ Equipo",
-                            "grupo": "🗂️ Grupo",
-                            "descripcion": "📋 Descripción",
-                            "pagina": st.column_config.NumberColumn("📄 Pág", format="%d"),
-                            "cantidad": "🔢 Cantidad",
-                        },
+                        column_config=config_columnas,
                         hide_index=True,
                         use_container_width=True
                     )
 
-    # PESTAÑA 3: PORCENTAJES
+    # PESTAÑA 3: PORCENTAJES DE LLENADO
     with menu_principal[2]:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
         sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
