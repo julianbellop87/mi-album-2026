@@ -323,8 +323,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("<h6 style='text-align: center; margin-bottom: 10px;'>📋 Listados Completos para Compartir</h6>", unsafe_allow_html=True)
-
+        # PREPARACIÓN DE CADENAS DE TEXTO PARA LOS BOTONES DE ENVIAR
         str_faltan_completo = ", ".join([str(x) for x in sorted(faltan_lista)]) if faltan_lista else "¡Ninguna! Álbum lleno 🥳"
         txt_faltan = f"*🚨 MIS FALTANTES - ÁLBUM 2026*\n\nProgreso: {progreso_gen:.1f}%\n\n📋 *Lista:* {str_faltan_completo}"
         
@@ -335,15 +334,7 @@ else:
         str_tengo_completo = ", ".join([str(x) for x in sorted(tengo_lista)]) if tengo_lista else "Ninguna lámina registrada aún."
         txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026*\n\n📋 *Lista:* {str_tengo_completo}"
 
-        with st.expander("🚨 Ver y Copiar Lista de Faltantes", expanded=False):
-            st.code(txt_faltan, language="text")
-            
-        with st.expander("🔁 Ver y Copiar Lista de Repetidas", expanded=False):
-            st.code(txt_repes, language="text")
-            
-        with st.expander("✅ Ver y Copiar Lista de Lo Que Tengo", expanded=False):
-            st.code(txt_tengo, language="text")
-
+        # BOTONES DIRECTOS A WHATSAPP (SE REDUJERON LOS EXPANDERS ANTERIORES)
         url_faltan = f"https://api.whatsapp.com/send?text={quote(txt_faltan)}"
         st.markdown(f'<a href="{url_faltan}" target="_blank" style="text-decoration: none;"><button style="background-color: #E74C3C; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">📲 Compartir Faltantes por WhatsApp</button></a>', unsafe_allow_html=True)
 
@@ -375,10 +366,8 @@ else:
                 
             col_b3, col_b4 = st.columns(2)
             with col_b3: 
-                # SE MANTIENE "Ninguno" EN INDEX 0 Y SE AGREGA "Todos" EN LA LISTA ADICIONAL
                 eq_a = st.selectbox("⚽ Seleccionar Equipo A:", ["Ninguno", "Todos"] + lista_todos_equipos, index=0)
             with col_b4: 
-                # SE MANTIENE "Ninguno" EN INDEX 0 Y SE AGREGA "Todos" EN LA LISTA ADICIONAL
                 eq_b = st.selectbox("⚽ Seleccionar Equipo B:", ["Ninguno", "Todos"] + lista_todos_equipos, index=0)
             
             if (eq_a != "Ninguno" and eq_a != "Todos") or (eq_b != "Ninguno" and eq_b != "Todos"):
@@ -416,20 +405,15 @@ else:
             df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.contains('Escudo|Especial', case=False, na=False)]
             filtro_busqueda_activo = True
             
-        # LÓGICA DE FILTRADO CORREGIDA: SÓLO COMPRUEBA SI NO ES "Ninguno" NI "Todos"
         if eq_a != "Ninguno" or eq_b != "Ninguno":
             equipos_filtro = []
-            
-            # Si se elige "Todos" en alguno, significa que queremos la lista completa de países de ese selector
             if eq_a == "Todos" or eq_b == "Todos":
                 if eq_a != "Ninguno" and eq_a != "Todos": equipos_filtro.append(eq_a)
                 if eq_b != "Ninguno" and eq_b != "Todos": equipos_filtro.append(eq_b)
-                # Si ambos están en "Todos" o uno está en "Todos" y el otro en "Ninguno", pasan todos los equipos
                 if len(equipos_filtro) > 0:
                     df_pagina_view = df_pagina_view[df_pagina_view['equipo'].isin(equipos_filtro)]
                 filtro_busqueda_activo = True
             else:
-                # Caso de filtrado cruzado normal por marcas/países específicos
                 if eq_a != "Ninguno": equipos_filtro.append(eq_a)
                 if eq_b != "Ninguno": equipos_filtro.append(eq_b)
                 if equipos_filtro:
@@ -484,8 +468,6 @@ else:
                                         st.button(label_render, key=f"btn_view_{id_l}", disabled=True, use_container_width=True)
                                     st.html("</div>")
 
-                # COMPORTAMIENTO DE FILTRADO CORREGIDO: Si hay algún filtro activo que no sea "Todos" o "Ninguno", se dibuja directo en la raíz.
-                # Si ambos están en "Ninguno" o "Todos", conserva la vista organizada por expanders de equipos.
                 es_filtro_puro_equipos = (eq_a != "Ninguno" and eq_a != "Todos") or (eq_b != "Ninguno" and eq_b != "Todos")
                 
                 if seleccion_combo == "Ver Todo el Álbum (735 Láminas)" and not es_filtro_puro_equipos:
