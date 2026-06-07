@@ -46,17 +46,15 @@ st.html("""
         transform: scale(0.95) !important;
     }
     
-    /* Clase Falta */
+    /* Clases de estados */
     div.lamina-falta > div > div > button {
         background-color: #FADBD8 !important;
         color: #78281F !important;
     }
-    /* Clase Tengo */
     div.lamina-tengo > div > div > button {
         background-color: #2ECC71 !important;
         color: white !important;
     }
-    /* Clase Repetida */
     div.lamina-repetida > div > div > button {
         background-color: #F39C12 !important;
         color: white !important;
@@ -88,6 +86,15 @@ if "df_album" not in st.session_state:
                 cantidad INT DEFAULT 0
             );
         """)
+        # NUEVA TABLA MULTI-TRÁNSITO: Permite aislar cada intercambio por un ID único secuencial
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS album_transito (
+                id_registro SERIAL PRIMARY KEY,
+                id_intercambio INT,
+                id_lamina INT,
+                tipo VARCHAR(10) -- 'entrar' o 'salir'
+            );
+        """)
         conn.commit()
         
         cur.execute("SELECT COUNT(*) FROM album_2026;")
@@ -108,7 +115,7 @@ if "df_album" not in st.session_state:
         df_bd['id_lamina'] = df_bd['id_lamina'].astype(int)
         df_bd['cantidad'] = df_bd['cantidad'].astype(int)
     except Exception as e:
-        st.error(f"Error de conexión: {e}")
+        st.error(f"Error de conexión inicial: {e}")
         df_bd = pd.DataFrame(columns=['id_lamina', 'cantidad'])
 
     df_unido = pd.merge(df_excel, df_bd, left_on='Laminas', right_on='id_lamina', how='left')
@@ -144,6 +151,127 @@ def ejecutar_accion_lamina(id_lamina, modo_accion):
         elif "🛑" in modo_accion or "No la tengo" in modo_accion: nueva_cant = 0
         st.session_state["df_album"].loc[idx, 'cantidad'] = nueva_cant
         guardar_lamina_en_bd(id_lamina, nueva_cant)
+
+def obtener_siguiente_id_intercambio():
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT COALESCE(MAX(id_intercambio), 0) + 1 FROM album_transito;")
+        siguiente = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        return siguiente
+    except:
+        return 1
+
+def registrar_laminas_en_transito_bd(id_intercambio, lista_numeros, tipo):
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        for num in lista_numeros:
+            cur.execute("INSERT INTO album_transito (id_intercambio, id_lamina, tipo) VALUES (%s, %s, %s);", (id_intercambio, num, tipo))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        st.error(f"Error insertando tránsito: {e}")
+
+def procesar_lista_intercambio_multi_transito(id_intercambio, texto_input, tipo_operacion):
+    if not texto_input.strip():
+        return [], []
+    
+    tokens = [t.strip() for t in texto_input.replace('\n', ',').split(',') if t.strip().isdigit()]
+    numeros_procesar = [int(t) for t in tokens]
+    
+    exitosos = []
+    fallidos = []
+    df_album_actual = st.session_state["df_album"]
+    
+    # Consultar qué láminas ya están comprometidas en OTROS tránsitos activos en la BD
+    try:
+        conn = get_connection()
+        df_otros_t = pd.read_sql_query("SELECT id_lamina, tipo FROM album_transito;", conn)
+        conn.close()
+    except:
+        df_otros_t = pd.DataFrame(columns=['id_lamina', 'tipo'])
+
+    for num in numeros_procesar:
+        idx_lista = df_album_actual[df_album_actual['id_lamina'] == num].index
+        if idx_lista.empty:
+            fallidos.append((num, "No existe en el álbum"))
+            continue
+            
+        cant_real = int(df_album_actual.loc[idx_lista[0], 'cantidad'])
+        
+        # Conteo de compromisos previos en otros tránsitos
+        ya_en_entrada = len(df_otros_t[(df_otros_t['id_lamina'] == num) & (df_otros_t['tipo'] == 'entrar')])
+        ya_en_salida = len(df_otros_t[(df_otros_t['id_lamina'] == num) & (df_otros_t['tipo'] == 'salir')])
+        
+        if tipo_operacion == "entrar":
+            # Regla: No tenerla físicamente Y que no venga ya de camino en ningún otro intercambio abierto
+            if cant_real == 0 and ya_en_entrada == 0:
+                exitosos.append(num)
+            else:
+                motivo = f"Ya la tienes en el álbum (x{cant_real})" if cant_real > 0 else "Ya está comprometida en otro tránsito de entrada"
+                fallidos.append((num, motivo))
+                
+        elif tipo_operacion == "salir":
+            # Regla: Debe ser repetida y quedar saldo disponible restando los otros tránsitos de salida ya pactados
+            disponibles_ahora = (cant_real - 1) - ya_en_salida
+            if cant_real > 1 and disponibles_ahora > 0:
+                exitosos.append(num)
+            else:
+                if cant_real == 0: motivo = "No la tienes"
+                elif cant_real == 1: motivo = "Solo la tienes 1 vez (Pegada)"
+                else: motivo = "Todas tus repetidas ya están comprometidas en otros intercambios activos"
+                fallidos.append((num, motivo))
+                
+    if exitosos:
+        registrar_laminas_en_transito_bd(id_intercambio, exitosos, tipo_operacion)
+        
+    return exitosos, fallidos
+
+def aplicar_intercambio_especifico_bd(id_intercambio):
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Obtener lo que tiene este intercambio
+        cur.execute("SELECT id_lamina, tipo FROM album_transito WHERE id_intercambio = %s;", (id_intercambio,))
+        filas = cur.fetchall()
+        
+        df_local = st.session_state["df_album"]
+        
+        for id_l, tipo in filas:
+            idx = df_local[df_local['id_lamina'] == id_l].index
+            if not idx.empty:
+                cant_actual = int(df_local.loc[idx[0], 'cantidad'])
+                nueva_cant = cant_actual + 1 if tipo == 'entrar' else max(0, cant_actual - 1)
+                df_local.loc[idx[0], 'cantidad'] = nueva_cant
+                cur.execute("UPDATE album_2026 SET cantidad = %s WHERE id_lamina = %s;", (nueva_cant, id_l))
+                
+        # Eliminar este intercambio específico de la tabla intermedia
+        cur.execute("DELETE FROM album_transito WHERE id_intercambio = %s;", (id_intercambio,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        st.session_state["df_album"] = df_local
+        st.success(f"¡Intercambio #{id_intercambio} consolidado y aplicado al álbum real! 🤝")
+    except Exception as e:
+        st.error(f"Error al aplicar intercambio: {e}")
+
+def eliminar_intercambio_especifico_bd(id_intercambio):
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM album_transito WHERE id_intercambio = %s;", (id_intercambio,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        st.info(f"Intercambio #{id_intercambio} cancelado y borrado del mapa.")
+    except Exception as e:
+        st.error(f"Error al eliminar tránsito: {e}")
 
 # --- 🔓 SEGURIDAD Y ACCESO ---
 if "autenticado" not in st.session_state: st.session_state["autenticado"] = False
@@ -206,7 +334,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("<h6 style='text-align: center; margin-bottom: 10px;'>📲 Compartir Listados Consecutivos (Uno a Uno)</h6>", unsafe_allow_html=True)
+        st.markdown("<h6 style='text-align: center; margin-bottom: 10px;'>📲 Compartir Listados Consecutivos</h6>", unsafe_allow_html=True)
 
         str_faltan_completo = ", ".join([str(x) for x in sorted(faltan_lista)]) if faltan_lista else "¡Ninguna! Álbum lleno 🥳"
         txt_faltan = f"*🚨 MIS FALTANTES - ÁLBUM 2026*\n\nProgreso: {progreso_gen:.1f}%\n\n📋 *Lista:* {str_faltan_completo}"
@@ -218,35 +346,86 @@ else:
         str_tengo_completo = ", ".join([str(x) for x in sorted(tengo_lista)]) if tengo_lista else "Ninguna lámina registrada aún."
         txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026*\n\n📋 *Lista:* {str_tengo_completo}"
 
-        # --- BOTÓN 1: ENVIAR FALTANTES (100% DIRECTO AUTOMÁTICO - ROJO ORIGINAL) ---
         url_faltan = f"https://api.whatsapp.com/send?text={quote(txt_faltan)}"
-        st.markdown(f"""
-            <a href="{url_faltan}" target="_blank" style="text-decoration: none;">
-                <button style="background-color: #E74C3C; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">
-                    🚨 Enviar Faltantes
-                </button>
-            </a>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<a href="{url_faltan}" target="_blank" style="text-decoration: none;"><button style="background-color: #E74C3C; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">🚨 Enviar Faltantes</button></a>', unsafe_allow_html=True)
 
-        # --- BOTÓN 2: ENVIAR REPETIDAS (100% DIRECTO AUTOMÁTICO - NARANJA) ---
         url_repes = f"https://api.whatsapp.com/send?text={quote(txt_repes)}"
-        st.markdown(f"""
-            <a href="{url_repes}" target="_blank" style="text-decoration: none;">
-                <button style="background-color: #F39C12; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">
-                    🔁 Enviar Repetidas
-                </button>
-            </a>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<a href="{url_repes}" target="_blank" style="text-decoration: none;"><button style="background-color: #F39C12; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">🔁 Enviar Repetidas</button></a>', unsafe_allow_html=True)
 
-        # --- BOTÓN 3: ENVIAR LO QUE TENGO (100% DIRECTO AUTOMÁTICO - VERDE) ---
         url_tengo = f"https://api.whatsapp.com/send?text={quote(txt_tengo)}"
-        st.markdown(f"""
-            <a href="{url_tengo}" target="_blank" style="text-decoration: none;">
-                <button style="background-color: #2ECC71; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">
-                    ✅ Enviar Lo Que Tengo
-                </button>
-            </a>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<a href="{url_tengo}" target="_blank" style="text-decoration: none;"><button style="background-color: #2ECC71; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer; height: 45px;">✅ Enviar Lo Que Tengo</button></a>', unsafe_allow_html=True)
+
+        # --- 🔁 MÓDULO DE INTERCAMBIO IDENTIFICADO (EVITA CRUCES EN TIEMPO CERCANO) ---
+        if st.session_state["modo_rol"] == "admin":
+            st.write("---")
+            
+            with st.expander("🔁 Módulo de Intercambio (Gestión de Tránsitos Enumerados)", expanded=False):
+                # Generar consecutivo dinámico en tiempo real
+                id_actual_intercambio = obtener_siguiente_id_intercambio()
+                
+                st.markdown(f"<div style='background-color:#ebf5fb; padding:8px; border-radius:6px; margin-bottom:12px; text-align:center;'><b>📝 Preparando Nuevo Bloque: Intercambio #{id_actual_intercambio}</b></div>", unsafe_allow_html=True)
+                
+                col_int1, col_int2 = st.columns(2)
+                with col_int1:
+                    st.markdown("<b style='color:#2ECC71;'>📥 INGRESAR (A este Tránsito)</b>", unsafe_allow_html=True)
+                    txt_entrar = st.text_area("Números a entrar:", value="", placeholder="Ej: 5, 12, 45", key="area_entrar_multi", height=100)
+                    if st.button("📥 Registrar Entrada", use_container_width=True):
+                        ok, bad = procesar_lista_intercambio_multi_transito(id_actual_intercambio, txt_entrar, "entrar")
+                        if ok: st.success(f"Registradas en Tránsito #{id_actual_intercambio}: {', '.join(map(str, ok))}")
+                        if bad:
+                            st.markdown("<p style='color:#E74C3C; font-weight:bold; font-size:12px; margin-bottom:2px;'>⚠️ Fallaron:</p>", unsafe_allow_html=True)
+                            for n, m in bad: st.write(f"<span style='font-size:12px;'>• No. {n}: {m}</span>", unsafe_allow_html=True)
+                        if ok or bad: st.rerun()
+                
+                with col_int2:
+                    st.markdown("<b style='color:#F39C12;'>📤 SACAR (De este Tránsito)</b>", unsafe_allow_html=True)
+                    txt_sacar = st.text_area("Números a sacar:", value="", placeholder="Ej: 6, 17", key="area_sacar_multi", height=100)
+                    if st.button("📤 Registrar Salida", use_container_width=True):
+                        ok, bad = procesar_lista_intercambio_multi_transito(id_actual_intercambio, txt_sacar, "salir")
+                        if ok: st.success(f"Sacadas en Tránsito #{id_actual_intercambio}: {', '.join(map(str, ok))}")
+                        if bad:
+                            st.markdown("<p style='color:#E74C3C; font-weight:bold; font-size:12px; margin-bottom:2px;'>⚠️ Fallaron:</p>", unsafe_allow_html=True)
+                            for n, m in bad: st.write(f"<span style='font-size:12px;'>• No. {n}: {m}</span>", unsafe_allow_html=True)
+                        if ok or bad: st.rerun()
+
+                # --- PANEL DE REVISIÓN Y CIERRE DE TRÁNSITOS PENDIENTES ---
+                try:
+                    conn = get_connection()
+                    df_pendientes = pd.read_sql_query("SELECT id_intercambio, id_lamina, tipo FROM album_transito ORDER BY id_intercambio, id_lamina;", conn)
+                    conn.close()
+                except:
+                    df_pendientes = pd.DataFrame()
+
+                if not df_pendientes.empty:
+                    st.write("---")
+                    st.markdown("##### ⏳ Intercambios Abiertos Pendientes por Confirmar:")
+                    
+                    # Agrupar e iterar por cada identificador de intercambio único independiente
+                    for id_int, sub_df_int in df_pendientes.groupby('id_intercambio'):
+                        list_entran = sub_df_int[sub_df_int['tipo'] == 'entrar']['id_lamina'].tolist()
+                        list_salen = sub_df_int[sub_df_int['tipo'] == 'salir']['id_lamina'].tolist()
+                        
+                        str_entran = ", ".join(map(str, sorted(list_entran))) if list_entran else "Ninguna"
+                        str_salen = ", ".join(map(str, sorted(list_salen))) if list_salen else "Ninguna"
+                        
+                        # Tarjeta visual estilizada por ID de Intercambio
+                        st.markdown(f"""
+                        <div style='background-color:#f9f9f9; padding:10px; border-radius:6px; border-left:4px solid #34495e; margin-bottom:8px;'>
+                            <b style='font-size:13px; color:#2c3e50;'>🤝 INTERCAMBIO #{id_int}</b><br>
+                            <span style='font-size:12px; color:#2ecc71;'>📥 Entran al álbum:</span> <span style='font-size:12px;'>{str_entran}</span><br>
+                            <span style='font-size:12px; color:#e67e22;'>📤 Salen del álbum:</span> <span style='font-size:12px;'>{str_salen}</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        col_acc1, col_acc2 = st.columns(2)
+                        with col_acc1:
+                            if st.button(f"✅ Aplicar Intercambio #{id_int}", key=f"ok_{id_int}", use_container_width=True):
+                                aplicar_intercambio_especifico_bd(id_int)
+                                st.rerun()
+                        with col_acc2:
+                            if st.button(f"❌ Cancelar Intercambio #{id_int}", key=f"del_{id_int}", use_container_width=True):
+                                eliminar_intercambio_especifico_bd(id_int)
+                                st.rerun()
 
     # PESTAÑA 2: NAVEGADOR DE LÁMINAS
     with menu_principal[1]:
@@ -259,13 +438,29 @@ else:
         modo_vista = st.radio("Selecciona la interfaz de carga:", ["Opcion 1: Vista Individual 📱", "Opcion 2: Vista Tabla (PC masiva) 💻"], horizontal=True)
         df_nav = st.session_state["df_album"]
         
-        with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=False):
-            col_b1, col_b2 = st.columns(2)
-            with col_b1: buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="")
-            with col_b2: buscar_equipo = st.selectbox("⚽ Filtrar por Equipo:", ["Todos los Equipos"] + list(df_nav.groupby('equipo', sort=False).first().index))
+        with st.expander("🔍 Buscadores Especializados", expanded=False):
+            col_b1, col_b2 = st.columns([1.5, 2])
+            with col_b1: 
+                buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="")
+            with col_b2:
+                lista_todos_equipos = sorted([e for e in df_nav['equipo'].unique() if str(e).strip()])
+                buscar_escudos = st.checkbox("🛡️ Filtrar solo Escudos / Especiales", value=False)
+                
             col_b3, col_b4 = st.columns(2)
-            with col_b3: buscar_grupo = st.selectbox("🗂️ Filtrar por Grupo:", ["Todos los Grupos"] + list(df_nav.groupby('grupo', sort=False).first().index))
-            with col_b4: buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())])
+            with col_b3: 
+                eq_a = st.selectbox("⚽ Equipo A:", ["Ninguno"] + lista_todos_equipos, index=0)
+            with col_b4: 
+                eq_b = st.selectbox("⚽ Equipo B:", ["Ninguno"] + lista_todos_equipos, index=0)
+            
+            if eq_a != "Ninguno" or eq_b != "Ninguno":
+                st.markdown("<div style='background-color:#f1f2f6; padding:8px; border-radius:6px; margin-top:5px; font-size:12px;'>", unsafe_allow_html=True)
+                if eq_a != "Ninguno":
+                    inf_a = df_nav[df_nav['equipo'] == eq_a].iloc[0]
+                    st.markdown(f"📋 **Equipo A ({eq_a}):** Grupo {inf_a['grupo']} — Ubicado en la **Página {inf_a['pagina']}**", unsafe_allow_html=True)
+                if eq_b != "Ninguno":
+                    inf_b = df_nav[df_nav['equipo'] == eq_b].iloc[0]
+                    st.markdown(f"📋 **Equipo B ({eq_b}):** Grupo {inf_b['grupo']} — Ubicado en la **Página {inf_b['pagina']}**", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
 
         secciones_unicas = df_nav.groupby(['pagina', 'equipo', 'grupo'], sort=False).size().reset_index()
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"]
@@ -273,7 +468,7 @@ else:
             opciones_combo.append(f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})")
             
         seleccion_combo = st.selectbox("📖 Filtrar por Sección Completa:", opciones_combo, index=0)
-        filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
+        filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Faltantes", "Tengo", "Repetidas"], horizontal=True)
 
         df_pagina_view = df_nav.copy()
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
@@ -282,24 +477,25 @@ else:
             equipo_real = partes[1].split(" (")[0].strip()
             df_pagina_view = df_pagina_view[(df_pagina_view['pagina'] == pag_real) & (df_pagina_view['equipo'] == equipo_real)]
             
-        # Variables de control para saber si hay filtros manuales de búsqueda activos
         filtro_busqueda_activo = False
         if buscar_num.strip().isdigit(): 
             df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
             filtro_busqueda_activo = True
-        if buscar_equipo != "Todos los Equipos": 
-            df_pagina_view = df_pagina_view[df_pagina_view['equipo'] == buscar_equipo]
+            
+        if buscar_escudos:
+            df_pagina_view = df_pagina_view[df_pagina_view['descripcion'].str.contains('Escudo|Especial', case=False, na=False)]
             filtro_busqueda_activo = True
-        if buscar_grupo != "Todos los Grupos": 
-            df_pagina_view = df_pagina_view[df_pagina_view['grupo'] == buscar_grupo]
-            filtro_busqueda_activo = True
-        if buscar_por_pagina != "Todas las Páginas": 
-            df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
+            
+        if eq_a != "Ninguno" or eq_b != "Ninguno":
+            equipos_seleccionados = []
+            if eq_a != "Ninguno": equipos_seleccionados.append(eq_a)
+            if eq_b != "Ninguno": equipos_seleccionados.append(eq_b)
+            df_pagina_view = df_pagina_view[df_pagina_view['equipo'].isin(equipos_seleccionados)]
             filtro_busqueda_activo = True
 
-        if filtro_inventario == "Solo Faltantes 🚨": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
-        elif filtro_inventario == "Solo las que Tengo ✅": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 0]
-        elif filtro_inventario == "Solo Repetidas 🔁": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
+        if filtro_inventario == "Faltantes": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
+        elif filtro_inventario == "Tengo": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 0]
+        elif filtro_inventario == "Repetidas": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
 
         df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
 
@@ -309,8 +505,6 @@ else:
             if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
                 
-                # --- CONTROL DE APERTURA GLOBAL ---
-                # Si el combo está en 'Ver todo el álbum' y NO hay filtros de caja escritos, por defecto estará en False (cerrado/acoplado)
                 estado_predeterminado = False
                 if seleccion_combo != "Ver Todo el Álbum (735 Láminas)" or filtro_busqueda_activo:
                     estado_predeterminado = True
@@ -351,14 +545,13 @@ else:
                                         st.button(label_render, key=f"btn_view_{id_l}", disabled=True, use_container_width=True)
                                     st.html("</div>")
 
-                if seleccion_combo == "Ver Todo el Álbum (735 Láminas)" and buscar_equipo == "Todos los Equipos":
+                if seleccion_combo == "Ver Todo el Álbum (735 Láminas)" and eq_a == "Ninguno" and eq_b == "Ninguno":
                     for (pag, eq, gr), df_eq_sub in df_pagina_view.groupby(['pagina', 'equipo', 'grupo'], sort=False):
                         total_seccion = len(df_eq_sub)
                         tengo_seccion = df_eq_sub[df_eq_sub['cantidad'] > 0]['id_lamina'].count()
                         
                         titulo_expander = f"⚽ {eq} — Gr. {gr} — Pág. {pag} ({tengo_seccion}/{total_seccion})"
                         
-                        # Usamos la variable 'desplegar_todos' para controlar de forma inteligente el expander
                         with st.expander(titulo_expander, expanded=desplegar_todos):
                             renderizar_cuadrícula_limpia(df_eq_sub)
                 else:
