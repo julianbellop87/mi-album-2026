@@ -1,14 +1,3 @@
-¡Ya veo perfectamente qué pasó en la última imagen (image_854728.png)! Qué buen ojo tenés para testear la interfaz.
-
-El problema es un clásico error de lógica condicional en el renderizado de Streamlit. Si miras el código actual, toda la sección que dibuja las láminas una por una con los botones de ➕ y ➖ quedó por fuera del bloque if "Opcion 1" in modo_vista:.
-
-Por eso, aunque selecciones la Opción 2: Vista Tabla (PC masiva), el script ignora el cambio y te sigue pintando la interfaz de celular (los bloques individuales) abajo de los filtros.
-
-Vamos a solucionarlo de inmediato. Corregí la estructura dividiendo limpiamente ambas opciones con un if/else real para que cuando marques la opción de PC, se oculte por completo la de celular y aparezca tu tabla indexada interactiva (st.data_editor).
-
-Aquí tenés el archivo corregido listo para producción:
-
-Python
 import streamlit as st
 import psycopg2
 from urllib.parse import quote
