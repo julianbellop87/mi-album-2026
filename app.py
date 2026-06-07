@@ -34,7 +34,7 @@ if "df_album" not in st.session_state:
         # Copia de respaldo por seguridad si falla la lectura inicial de Postgres
         df_bd = pd.DataFrame({'id_lamina': df_excel['Laminas'], 'cantidad': 0})
 
-    # 3. Mapeo y cruce exacto: La app manda sobre los textos y páginas del Excel
+    # 3. Mapeo y cruce exacto sin duplicar nombres de columnas
     df_unido = pd.merge(
         df_excel, df_bd, 
         left_on='Laminas', right_on='id_lamina', 
@@ -44,17 +44,17 @@ if "df_album" not in st.session_state:
     # Rellenar con 0 si alguna lámina no tenía registro de cantidad
     df_unido['cantidad'] = df_unido['cantidad'].fillna(0).astype(int)
     
-    # Renombrar y estructurar limpio para el resto de la app
-    df_unido = df_unido.rename(columns={
-        'Laminas': 'id_lamina',
-        'Equipo': 'equipo',
-        'Grupo': 'grupo',
-        'Descripicion': 'descripcion',
-        'Pagina': 'pagina'
-    })[['id_lamina', 'equipo', 'grupo', 'descripcion', 'pagina', 'cantidad']]
+    # Seleccionamos las columnas correctas evitando que 'id_lamina' se duplique
+    df_final = pd.DataFrame()
+    df_final['id_lamina'] = df_unido['Laminas']
+    df_final['equipo'] = df_unido['Equipo'].astype(str).str.strip()
+    df_final['grupo'] = df_unido['Grupo'].astype(str).str.strip()
+    df_final['descripcion'] = df_unido['Descripicion'].astype(str).str.strip()
+    df_final['pagina'] = df_unido['Pagina'].astype(int)
+    df_final['cantidad'] = df_unido['cantidad']
     
     # Asegurar orden consecutivo estricto por el número de lámina
-    st.session_state["df_album"] = df_unido.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
+    st.session_state["df_album"] = df_final.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
 if "tiene_cambios" not in st.session_state:
     st.session_state["tiene_cambios"] = False
@@ -82,17 +82,16 @@ def forzar_sincronizacion_bd():
             for _, fila in st.session_state["df_album"].iterrows():
                 lote.append((int(fila['cantidad']), str(fila['id_lamina'])))
             
-            # Intenta actualizar el registro. Si por el DROP anterior se perdieron IDs, los inserta de nuevo de forma segura.
+            # Actualiza o reinserta si es necesario sin alterar el orden del Excel
             for cant, id_lam in lote:
                 cur.execute(
                     "UPDATE album_2026 SET cantidad = %s WHERE id_lamina::varchar = %s::varchar;",
                     (cant, id_lam)
                 )
                 if cur.rowcount == 0:
-                    # Traemos los datos de la fila actual para reponer el registro borrado
                     fila_completa = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == int(id_lam)].iloc[0]
                     cur.execute(
-                        "INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad) VALUES (%s, %s, %s, %s, %s, %s);",
+                        "INSERT INTO album_2026 (id_lamina, equipo, group_col, descripcion, pagina, cantidad) VALUES (%s, %s, %s, %s, %s, %s);",
                         (str(id_lam), str(fila_completa['equipo']), str(fila_completa['grupo']), str(fila_completa['descripcion']), int(fila_completa['pagina']), cant)
                     )
             
@@ -206,7 +205,7 @@ else:
             if st.session_state["tiene_cambios"]:
                 st.warning("⚠️ Tienes modificaciones locales sin guardar en la nube.")
                 if st.button("💾 GUARDAR CAMBIOS EN LA NUBE", type="primary", use_container_width=True):
-                    forzar_sincronizacion_bd()
+                    forrar_sincronizacion_bd()
                     st.rerun()
             else:
                 st.info("✅ Todos los datos están guardados y sincronizados.")
