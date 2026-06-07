@@ -7,10 +7,9 @@ import os
 # 1. CONFIGURACIÓN DE PÁGINA ESENCIAL
 st.set_page_config(page_title="Mi Álbum 2026", layout="centered")
 
-# --- ESTILOS CSS PERSONALIZADOS (ALINEACIÓN FIJA Y ULTRA COMPACTOS) ---
+# --- ESTILOS CSS PERSONALIZADOS ---
 st.html("""
 <style>
-    /* Minimiza el espacio vertical entre los bloques nativos de Streamlit */
     [data-testid="stVerticalBlock"] {
         gap: 0.15rem !important;
     }
@@ -19,7 +18,6 @@ st.html("""
         margin-bottom: 0.1rem !important;
     }
     
-    /* Reduce el margen de los contenedores de las láminas */
     div[id^="stHtmlContainer"] {
         margin-bottom: 0px !important;
         padding: 0px !important;
@@ -48,17 +46,17 @@ st.html("""
         transform: scale(0.95) !important;
     }
     
-    /* Clase Falta: Rojo Suave */
-    div.lamina-falta > div > div > button {
+    /* Clase Falta */
+    div.lamina-alta > div > div > button {
         background-color: #FADBD8 !important;
         color: #78281F !important;
     }
-    /* Clase Tengo: Verde General */
+    /* Clase Tengo */
     div.lamina-tengo > div > div > button {
         background-color: #2ECC71 !important;
         color: white !important;
     }
-    /* Clase Repetida: Naranja General */
+    /* Clase Repetida */
     div.lamina-repetida > div > div > button {
         background-color: #F39C12 !important;
         color: white !important;
@@ -71,10 +69,8 @@ DB_URL = "postgresql://db_album_2026_user:LnvkGg5iePassMcDJmpHSefSnywvLxXA@dpg-d
 def get_connection():
     return psycopg2.connect(DB_URL)
 
-# --- 🔒 FLUJO SEGURO DE DATOS ---
 if "df_album" not in st.session_state:
     archivo_excel = "Album_CopaMundo2026_Completo.xlsx"
-    
     try:
         df_excel = pd.read_excel(archivo_excel)
         df_excel['Laminas'] = df_excel['Laminas'].astype(int)
@@ -82,7 +78,6 @@ if "df_album" not in st.session_state:
         
         conn = get_connection()
         cur = conn.cursor()
-        
         cur.execute("""
             CREATE TABLE IF NOT EXISTS album_2026 (
                 id_lamina INT PRIMARY KEY,
@@ -101,15 +96,9 @@ if "df_album" not in st.session_state:
         if registros_en_bd == 0:
             for _, fila in df_excel.iterrows():
                 cur.execute("""
-                    INSERT INTO album_2026 (id_lamina, equipo, grupo, descripcion, pagina, cantidad)
+                    INSERT INTO album_2026 (id_lamina, equipo, groupo, descripcion, pagina, cantidad)
                     VALUES (%s, %s, %s, %s, %s, 0);
-                """, (
-                    int(fila['Laminas']), 
-                    str(fila['Equipo']).strip(), 
-                    str(fila['Grupo']).strip(), 
-                    str(fila['Descripicion']).strip(), 
-                    int(fila['Pagina'])
-                ))
+                """, (int(fila['Laminas']), str(fila['Equipo']).strip(), str(fila['Grupo']).strip(), str(fila['Descripicion']).strip(), int(fila['Pagina'])))
             conn.commit()
             
         df_bd = pd.read_sql_query("SELECT id_lamina, cantidad FROM album_2026;", conn)
@@ -118,7 +107,6 @@ if "df_album" not in st.session_state:
         
         df_bd['id_lamina'] = df_bd['id_lamina'].astype(int)
         df_bd['cantidad'] = df_bd['cantidad'].astype(int)
-        
     except Exception as e:
         st.error(f"Error de conexión: {e}")
         df_bd = pd.DataFrame(columns=['id_lamina', 'cantidad'])
@@ -133,59 +121,38 @@ if "df_album" not in st.session_state:
     df_final['descripcion'] = df_unido['Descripicion'].astype(str).str.strip()
     df_final['pagina'] = df_unido['Pagina'].astype(int)
     df_final['cantidad'] = df_unido['cantidad']
-    
     st.session_state["df_album"] = df_final.sort_values(by='id_lamina', ascending=True).reset_index(drop=True)
 
-
-# --- GUARDADO DIRECTO AUTOMÁTICO EN LA NUBE ---
 def guardar_lamina_en_bd(id_lamina, nueva_cantidad):
     try:
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("""
-            UPDATE album_2026 
-            SET cantidad = %s 
-            WHERE id_lamina = %s;
-        """, (nueva_cantidad, id_lamina))
+        cur.execute("UPDATE album_2026 SET cantidad = %s WHERE id_lamina = %s;", (nueva_cantidad, id_lamina))
         conn.commit()
         cur.close()
         conn.close()
     except Exception as e:
         st.error(f"Error al sincronizar cambio en la nube: {e}")
 
-
-# --- CALLBACK DE ACCIÓN DIRECTA ---
 def ejecutar_accion_lamina(id_lamina, modo_accion):
     idx = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_lamina].index
     if not idx.empty:
         actual = int(st.session_state["df_album"].loc[idx, 'cantidad'].values[0])
         nueva_cant = actual
-        
-        if "➕" in modo_accion:
-            nueva_cant = actual + 1
-        elif "➖" in modo_accion and actual > 0:
-            nueva_cant = actual - 1
-        elif "🛑" in modo_accion or "No la tengo" in modo_accion or "Reiniciar" in modo_accion:
-            nueva_cant = 0
-            
+        if "➕" in modo_accion: nueva_cant = actual + 1
+        elif "➖" in modo_accion and actual > 0: nueva_cant = actual - 1
+        elif "🛑" in modo_accion or "No la tengo" in modo_accion: nueva_cant = 0
         st.session_state["df_album"].loc[idx, 'cantidad'] = nueva_cant
         guardar_lamina_en_bd(id_lamina, nueva_cant)
 
-
-# ==========================================================
-# 🔐 SEGURIDAD Y ACCESO
-# ==========================================================
-if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = False
-if "modo_rol" not in st.session_state:
-    st.session_state["modo_rol"] = None
+# --- 🔓 SEGURIDAD Y ACCESO ---
+if "autenticado" not in st.session_state: st.session_state["autenticado"] = False
+if "modo_rol" not in st.session_state: st.session_state["modo_rol"] = None
 
 if not st.session_state["autenticado"]:
-    if os.path.exists("logo.jpg"):
-        st.image("logo.jpg", width=140)
+    if os.path.exists("logo.jpg"): st.image("logo.jpg", width=140)
     st.markdown("<h3 style='margin-top: -5px;'>👋 Bienvenido a Mi Álbum</h3>", unsafe_allow_html=True)
     opcion_ingreso = st.radio("Acceso:", ["Consulta (Solo Lectura) 👁️", "Usuario (Administrador) 🔑"], horizontal=True)
-    
     if "Usuario (Administrador)" in opcion_ingreso:
         user_input = st.text_input("Usuario:", value="")
         pass_input = st.text_input("Contraseña:", type="password", value="")
@@ -194,24 +161,20 @@ if not st.session_state["autenticado"]:
                 st.session_state["autenticado"] = True
                 st.session_state["modo_rol"] = "admin"
                 st.rerun()
-            else:
-                st.error("Credenciales incorrectas.")
+            else: st.error("Credenciales incorrectas.")
     else:
         if st.button("🚀 Ingresar Directo"):
             st.session_state["autenticado"] = True
             st.session_state["modo_rol"] = "consulta"
             st.rerun()
-
 else:
     st.markdown("<h2 style='text-align: center; margin-top: -10px; margin-bottom: 5px;'>🏆 Mi Álbum 2026</h2>", unsafe_allow_html=True)
-    
     col_vacio, col_logout = st.columns([4, 1.2])
     with col_logout:
         if st.button("🚪 Salir"):
             st.session_state["autenticado"] = False
             st.session_state["modo_rol"] = None
-            if "df_album" in st.session_state:
-                del st.session_state["df_album"]
+            if "df_album" in st.session_state: del st.session_state["df_album"]
             st.rerun()
 
     menu_principal = st.tabs(["📈 General", "⚙️ Navegador de Láminas", "📊 Porcentajes de Llenado"])
@@ -232,47 +195,72 @@ else:
         total_repes = df_gen['es_repetida'].sum()
         progreso_gen = (total_tengo / total_laminas) * 100 if total_laminas > 0 else 0
 
-        st.write("")
         st.markdown(f"<p style='text-align: center; margin-bottom: 5px; font-weight: bold; font-size: 15px;'>📊 Progreso General: {progreso_gen:.1f}% ({total_tengo} / {total_laminas} láminas)</p>", unsafe_allow_html=True)
         st.progress(progreso_gen / 100)
         
         st.markdown(f"""
         <div style='display: flex; justify-content: space-around; text-align: center; background-color: #f0f2f6; padding: 10px; border-radius: 8px; margin-top: 5px; margin-bottom: 15px;'>
-            <div><b style='font-size: 11px; color: #2ecc71;'>✅ TENGO</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_tengo} láminas</span></div>
-            <div><b style='font-size: 11px; color: #e74c3c;'>🚨 FALTAN</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_faltan} láminas</span></div>
-            <div><b style='font-size: 11px; color: #f39c12;'>🔁 REPETIDAS</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_repes} láminas</span></div>
+            <div><b style='font-size: 11px; color: #2ecc71;'>✅ TENGO</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_tengo}</span></div>
+            <div><b style='font-size: 11px; color: #e74c3c;'>🚨 FALTAN</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_faltan}</span></div>
+            <div><b style='font-size: 11px; color: #f39c12;'>🔁 REPETIDAS</b><br><span style='font-size: 13px; font-weight: bold; color:#333333;'>{total_repes}</span></div>
         </div>
         """, unsafe_allow_html=True)
         
         st.markdown("<h6 style='text-align: center; margin-bottom: 10px;'>📲 Compartir Listados Consecutivos (Uno a Uno)</h6>", unsafe_allow_html=True)
 
-        # --- FUNCIÓN LOGÍSTICA INTELIGENTE DE ENVÍO ---
-        def renderizar_modulo_envio(titulo_seccion, texto_completo, color_hex):
-            # Si el texto es corto, se habilita el enlace directo nativo de WhatsApp
-            if len(texto_completo) < 1500:
-                link_wa = f"https://api.whatsapp.com/send?text={quote(texto_completo)}"
-                st.markdown(f'<a href="{link_wa}" target="_blank"><button style="background-color:{color_hex};color:white;border:none;padding:10px;border-radius:6px;cursor:pointer;font-weight:bold;width:100%;margin-bottom:12px;">📲 {titulo_seccion} (Envío Automático)</button></a>', unsafe_allow_html=True)
+        # --- RE-DISEÑO DE MÓDULO INTELIGENTE Y ESTÉTICO ---
+        def renderizar_boton_inteligente(id_clave, titulo, texto_enviar, color_bg):
+            # Límite seguro estimado para evitar cortes de URL en WhatsApp
+            IMPERFECCION_WHATSAPP_LIMIT = 1500 
+            
+            if len(texto_enviar) < IMPERFECCION_WHATSAPP_LIMIT:
+                # Caso ideal (Texto corto): Redirección limpia mediante link
+                url_wa = f"https://api.whatsapp.com/send?text={quote(texto_enviar)}"
+                st.markdown(f"""
+                    <a href="{url_wa}" target="_blank" style="text-decoration: none;">
+                        <button style="background-color: {color_bg}; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; width: 100%; margin-bottom: 8px; cursor: pointer;">
+                            📲 {titulo}
+                        </button>
+                    </a>
+                """, unsafe_allow_html=True)
             else:
-                # Si es muy largo, se despliega el contenedor seguro con botón superior de copia
-                st.markdown(f"<b style='color:{color_hex}; font-size:13px;'>📋 {titulo_seccion} (Muy largo - Copia aquí abajo 👇):</b>", unsafe_allow_html=True)
-                st.code(texto_completo, language="text")
+                # Caso crítico (Texto muy largo): Inyección JS invisible para copiar al portapapeles sin romper el diseño
+                texto_escapado = texto_enviar.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+                
+                # Usamos un session state dinámico por botón para saber si fue pulsado y mostrar el cartelito guía
+                key_estado = f"click_{id_clave}"
+                if key_estado not in st.session_state:
+                    st.session_state[key_estado] = False
 
-        # 1. Módulo Faltantes
+                # Botón estético nativo integrado con el portapapeles por medio de st.components o st.button tradicional
+                if st.button(f"📲 {titulo}", key=f"btn_copy_{id_clave}", use_container_width=True):
+                    st.session_state[key_estado] = True
+                    # Script JS temporal inyectado en el cliente para forzar el guardado en memoria instantáneo
+                    st.components.v1.html(f"""
+                        <script>
+                            navigator.clipboard.writeText('{texto_escapado}');
+                        </script>
+                    """, height=0, width=0)
+                
+                # Si el usuario le dio clic, mostramos el cartelito elegante abajo del botón sin deformar nada
+                if st.session_state[key_estado]:
+                    st.success("📋 ¡Copiado automáticamente! Texto muy largo para WhatsApp. Abre tu chat y dale Pegar.")
+
+        # Generación de las cadenas de datos
         str_faltan_completo = ", ".join([str(x) for x in sorted(faltan_lista)]) if faltan_lista else "¡Ninguna! Álbum lleno 🥳"
         txt_faltan = f"*🚨 MIS FALTANTES - ÁLBUM 2026*\n\nProgreso: {progreso_gen:.1f}%\n\n📋 *Lista:* {str_faltan_completo}"
-        renderizar_modulo_envio("Compartir Faltantes", txt_faltan, "#E74C3C")
-
-        # 2. Módulo Repetidas
+        
         lista_repes_format = [f"{k}(x{v})" for k, v in sorted(repes_dict.items())]
         str_repes_completo = ", ".join(lista_repes_format) if lista_repes_format else "Ninguna por ahora 👍"
         txt_repes = f"*🔁 MIS REPETIDAS - ÁLBUM 2026*\n\n📋 *Lista:* {str_repes_completo}"
-        renderizar_modulo_envio("Compartir Repetidas", txt_repes, "#F39C12")
-
-        # 3. Módulo Lo Que Tengo
+        
         str_tengo_completo = ", ".join([str(x) for x in sorted(tengo_lista)]) if tengo_lista else "Ninguna lámina registrada aún."
         txt_tengo = f"*✅ LO QUE TENGO - ÁLBUM 2026*\n\n📋 *Lista:* {str_tengo_completo}"
-        renderizar_modulo_envio("Compartir Lo Que Tengo", txt_tengo, "#2ECC71")
 
+        # Despliegue en paralelo o cascada idéntica
+        renderizar_boton_inteligente("faltan", "Compartir Faltantes", txt_faltan, "#E74C3C")
+        renderizar_boton_inteligente("repes", "Compartir Repetidas", txt_repes, "#F39C12")
+        renderizar_boton_inteligente("tengo", "Compartir Lo Que Tengo", txt_tengo, "#2ECC71")
 
     # PESTAÑA 2: NAVEGADOR DE LÁMINAS
     with menu_principal[1]:
@@ -282,31 +270,16 @@ else:
             st.success("🔑 Modo Administrador Activo. Sincronización en tiempo real con la nube ⚡")
 
         st.markdown("<h4>⚙️ Gestión e Inventario Consecutivo</h4>", unsafe_allow_html=True)
-        
-        modo_vista = st.radio(
-            "Selecciona la interfaz de carga:",
-            ["Opcion 1: Vista Individual 📱", "Opcion 2: Vista Tabla (PC masiva) 💻"],
-            horizontal=True
-        )
-        
+        modo_vista = st.radio("Selecciona la interfaz de carga:", ["Opcion 1: Vista Individual 📱", "Opcion 2: Vista Tabla (PC masiva) 💻"], horizontal=True)
         df_nav = st.session_state["df_album"]
         
-        # FILTROS AVANZADOS
         with st.expander("🔍 Buscadores Especializados (Filtros Avanzados)", expanded=False):
             col_b1, col_b2 = st.columns(2)
-            with col_b1:
-                buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="", placeholder="Ej: 16")
-            with col_b2:
-                lista_equipos_filtro = ["Todos los Equipos"] + list(df_nav.groupby('equipo', sort=False).first().index)
-                buscar_equipo = st.selectbox("⚽ Filtrar por Equipo:", lista_equipos_filtro)
-                
+            with col_b1: buscar_num = st.text_input("🔢 Buscar por Número de Lámina:", value="")
+            with col_b2: buscar_equipo = st.selectbox("⚽ Filtrar por Equipo:", ["Todos los Equipos"] + list(df_nav.groupby('equipo', sort=False).first().index))
             col_b3, col_b4 = st.columns(2)
-            with col_b3:
-                lista_grupos_filtro = ["Todos los Grupos"] + list(df_nav.groupby('grupo', sort=False).first().index)
-                buscar_grupo = st.selectbox("🗂️ Filtrar por Grupo:", lista_grupos_filtro)
-            with col_b4:
-                paginas_disponibles = ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())]
-                buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", paginas_disponibles)
+            with col_b3: buscar_grupo = st.selectbox("🗂️ Filtrar por Grupo:", ["Todos los Grupos"] + list(df_nav.groupby('grupo', sort=False).first().index))
+            with col_b4: buscar_por_pagina = st.selectbox("📄 Filtrar por Página:", ["Todas las Páginas"] + [str(p) for p in sorted(df_nav['pagina'].unique())])
 
         secciones_unicas = df_nav.groupby(['pagina', 'equipo', 'grupo'], sort=False).size().reset_index()
         opciones_combo = ["Ver Todo el Álbum (735 Láminas)"]
@@ -317,60 +290,41 @@ else:
         filtro_inventario = st.radio("Filtrar estado actual:", ["Todas", "Solo Faltantes 🚨", "Solo las que Tengo ✅", "Solo Repetidas 🔁"], horizontal=True)
 
         df_pagina_view = df_nav.copy()
-        
         if seleccion_combo != "Ver Todo el Álbum (735 Láminas)":
             partes = seleccion_combo.split(" - ")
             pag_real = int(partes[0].replace("Pág. ", "").strip())
             equipo_real = partes[1].split(" (")[0].strip()
             df_pagina_view = df_pagina_view[(df_pagina_view['pagina'] == pag_real) & (df_pagina_view['equipo'] == equipo_real)]
             
-        if buscar_num.strip().isdigit():
-            df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
-        if buscar_equipo != "Todos los Equipos":
-            df_pagina_view = df_pagina_view[df_pagina_view['equipo'] == buscar_equipo]
-        if buscar_grupo != "Todos los Grupos":
-            df_pagina_view = df_pagina_view[df_pagina_view['grupo'] == buscar_grupo]
-        if buscar_por_pagina != "Todas las Páginas":
-            df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
+        if buscar_num.strip().isdigit(): df_pagina_view = df_pagina_view[df_pagina_view['id_lamina'] == int(buscar_num.strip())]
+        if buscar_equipo != "Todos los Equipos": df_pagina_view = df_pagina_view[df_pagina_view['equipo'] == buscar_equipo]
+        if buscar_grupo != "Todos los Grupos": df_pagina_view = df_pagina_view[df_pagina_view['grupo'] == buscar_grupo]
+        if buscar_por_pagina != "Todas las Páginas": df_pagina_view = df_pagina_view[df_pagina_view['pagina'] == int(buscar_por_pagina)]
 
-        if filtro_inventario == "Solo Faltantes 🚨":
-            df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
-        elif filtro_inventario == "Solo las que Tengo ✅":
-            df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 0]
-        elif filtro_inventario == "Solo Repetidas 🔁":
-            df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
+        if filtro_inventario == "Solo Faltantes 🚨": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] == 0]
+        elif filtro_inventario == "Solo las que Tengo ✅": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 0]
+        elif filtro_inventario == "Solo Repetidas 🔁": df_pagina_view = df_pagina_view[df_pagina_view['cantidad'] > 1]
 
         df_pagina_view = df_pagina_view.sort_values(by='id_lamina', ascending=True)
 
         if df_pagina_view.empty:
             st.info("No se encontraron láminas con los filtros seleccionados.")
         else:
-            # ==========================================================
-            # OPCIÓN 1: INTERFAZ MÓVIL
-            # ==========================================================
             if "Opcion 1: Vista Individual" in modo_vista:
                 st.write("---")
-                
                 modo_click = "➕ Incrementar (+1)"
                 if st.session_state["modo_rol"] == "admin":
-                    modo_click = st.radio(
-                        "👇 Elige la acción para el toque de los cuadritos:",
-                        ["➕ Incrementar (+1)", "➖ Decrementar (-1)", "🛑 Reiniciar (0)"],
-                        horizontal=True
-                    )
+                    modo_click = st.radio("👇 Elige la acción para el toque de los cuadritos:", ["➕ Incrementar (+1)", "➖ Decrementar (-1)", "🛑 Reiniciar (0)"], horizontal=True)
                 
                 def renderizar_cuadrícula_limpia(df_bloque):
                     columnas_por_fila = 4
                     total_bloque = len(df_bloque)
-                    
                     for row_idx in range(0, total_bloque, columnas_por_fila):
                         sub_df = df_bloque.iloc[row_idx : row_idx + columnas_por_fila]
                         columnas_st = st.columns(columnas_por_fila)
-                        
                         for idx_col, (_, lam) in enumerate(sub_df.iterrows()):
                             id_l = int(lam['id_lamina'])
                             cant_actual = int(lam['cantidad'])
-                            
                             if cant_actual == 0:
                                 label_render = f"🛑 {id_l}\nFalta"
                                 wrapper_class = "lamina-falta"
@@ -385,55 +339,23 @@ else:
                                 with st.container(key=f"wrap_{id_l}"):
                                     st.html(f"<div class='{wrapper_class}'>")
                                     if st.session_state["modo_rol"] == "admin":
-                                        st.button(
-                                            label_render, 
-                                            key=f"btn_{id_l}", 
-                                            on_click=ejecutar_accion_lamina, 
-                                            args=(id_l, modo_click),
-                                            use_container_width=True
-                                        )
+                                        st.button(label_render, key=f"btn_{id_l}", on_click=ejecutar_accion_lamina, args=(id_l, modo_click), use_container_width=True)
                                     else:
                                         st.button(label_render, key=f"btn_view_{id_l}", disabled=True, use_container_width=True)
                                     st.html("</div>")
 
                 if seleccion_combo == "Ver Todo el Álbum (735 Láminas)" and buscar_equipo == "Todos los Equipos":
-                    equipos_unicos = df_pagina_view['equipo'].unique()
-                    for eq in equipos_unicos:
+                    for eq in df_pagina_view['equipo'].unique():
                         df_eq_sub = df_pagina_view[df_pagina_view['equipo'] == eq]
                         with st.expander(f"⚽ {eq} ({len(df_eq_sub)} láminas)", expanded=True):
                             renderizar_cuadrícula_limpia(df_eq_sub)
                 else:
                     renderizar_cuadrícula_limpia(df_pagina_view)
-                    
-                st.markdown("<br>", unsafe_allow_html=True)
-            
-            # ==========================================================
-            # OPCIÓN 2: VISTA TABLA ULTRA COMPACTA CORREGIDA (PC)
-            # ==========================================================
             else:
                 st.write("---")
-                # Clonamos y preparamos las columnas visuales de forma segura sin romper índices
                 df_pc_visual = df_pagina_view.copy()
-                
-                def mapear_estado_visual(cant):
-                    if cant == 0:
-                        return "🔴 Falta"
-                    elif cant == 1:
-                        return "🟢 Tengo"
-                    else:
-                        return f"🟠 Repetida (x{cant})"
-                        
-                df_pc_visual['Estado Actual'] = df_pc_visual['cantidad'].apply(mapear_estado_visual)
-                
-                # Renombramos explícitamente estructurando el dataframe
-                df_pc_visual = df_pc_visual.rename(columns={
-                    'id_lamina': 'No.',
-                    'equipo': 'Equipo',
-                    'pagina': 'Pag.',
-                    'cantidad': 'Cantidad'
-                })
-                
-                # Filtramos las columnas que se van a mostrar en pantalla
+                df_pc_visual['Estado Actual'] = df_pc_visual['cantidad'].apply(lambda c: "🔴 Falta" if c == 0 else ("🟢 Tengo" if c == 1 else f"🟠 Repetida (x{c})"))
+                df_pc_visual = df_pc_visual.rename(columns={'id_lamina': 'No.', 'equipo': 'Equipo', 'pagina': 'Pag.', 'cantidad': 'Cantidad'})
                 df_pc_final = df_pc_visual[['No.', 'Equipo', 'Pag.', 'Estado Actual', 'Cantidad']]
 
                 config_columnas_pc = {
@@ -445,41 +367,24 @@ else:
                 }
 
                 if st.session_state["modo_rol"] == "admin":
-                    tabla_editada = st.data_editor(
-                        df_pc_final,
-                        column_config=config_columnas_pc,
-                        hide_index=True,
-                        use_container_width=True,
-                        disabled=["No.", "Equipo", "Pag.", "Estado Actual"],
-                        key="editor_masivo_pc"
-                    )
-                    
-                    # Verificamos si hubo cambios en la columna de cantidad
+                    tabla_editada = st.data_editor(df_pc_final, column_config=config_columnas_pc, hide_index=True, use_container_width=True, disabled=["No.", "Equipo", "Pag.", "Estado Actual"], key="editor_masivo_pc")
                     if not tabla_editada['Cantidad'].equals(df_pc_final['Cantidad']):
                         for idx, fila in tabla_editada.iterrows():
                             id_l = int(fila['No.'])
                             nueva_cant = int(fila['Cantidad'])
-                            
                             idx_original = st.session_state["df_album"][st.session_state["df_album"]['id_lamina'] == id_l].index
                             if not idx_original.empty:
-                                val_actual = int(st.session_state["df_album"].loc[idx_original, 'cantidad'].values[0])
-                                if val_actual != nueva_cant:
+                                if int(st.session_state["df_album"].loc[idx_original, 'cantidad'].values[0]) != nueva_cant:
                                     st.session_state["df_album"].loc[idx_original, 'cantidad'] = nueva_cant
                                     guardar_lamina_en_bd(id_l, nueva_cant)
                         st.rerun()
                 else:
-                    st.dataframe(
-                        df_pc_final.drop(columns=['Cantidad']),
-                        column_config=config_columnas_pc,
-                        hide_index=True,
-                        use_container_width=True
-                    )
+                    st.dataframe(df_pc_final.drop(columns=['Cantidad']), column_config=config_columnas_pc, hide_index=True, use_container_width=True)
 
     # PESTAÑA 3: PORCENTAJES DE LLENADO
     with menu_principal[2]:
         st.markdown("<h4>📊 Estadísticas de Completado</h4>", unsafe_allow_html=True)
         sub_tabs = st.tabs(["📄 Por Página", "🛡️ Por Equipo", "🗂️ Por Grupo"])
-        
         df_stats = st.session_state["df_album"].copy()
         df_stats['tiene'] = df_stats['cantidad'].apply(lambda x: 1 if x > 0 else 0)
         
@@ -487,22 +392,12 @@ else:
             df_pag = df_stats.groupby(['pagina', 'equipo', 'grupo'], sort=False).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
             df_pag['Porcentaje'] = (df_pag['Adquiridas'] / df_pag['Total']) * 100
             df_pag['Sección del Álbum'] = df_pag.apply(lambda r: f"Pág. {r['pagina']} - {r['equipo']} ({r['grupo']})", axis=1)
-            st.dataframe(
-                df_pag[['Sección del Álbum', 'Total', 'Adquiridas', 'Porcentaje']].rename(
-                    columns={'Total': 'Total', 'Adquiridas': 'Tengo', 'Porcentaje': '% Llenado'}
-                ).style.format({'% Llenado': '{:.1f}%'}),
-                use_container_width=True, hide_index=True
-            )
+            st.dataframe(df_pag[['Sección del Álbum', 'Total', 'Adquiridas', 'Porcentaje']].rename(columns={'Total': 'Total', 'Adquiridas': 'Tengo', 'Porcentaje': '% Llenado'}).style.format({'% Llenado': '{:.1f}%'}), use_container_width=True, hide_index=True)
 
         with sub_tabs[1]:
             df_equipo = df_stats.groupby(['equipo', 'grupo'], sort=False).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
             df_equipo['Porcentaje'] = (df_equipo['Adquiridas'] / df_equipo['Total']) * 100
-            st.dataframe(
-                df_equipo[['equipo', 'grupo', 'Total', 'Adquiridas', 'Porcentaje']].rename(
-                    columns={'equipo': 'Equipo / Sección', 'grupo': 'Grupo', 'Total': 'Total', 'Adquiridas': 'Tengo', 'Porcentaje': '% Llenado'}
-                ).style.format({'% Llenado': '{:.1f}%'}),
-                use_container_width=True, hide_index=True
-            )
+            st.dataframe(df_equipo[['equipo', 'grupo', 'Total', 'Adquiridas', 'Porcentaje']].rename(columns={'equipo': 'Equipo / Sección', 'grupo': 'Grupo', 'Total': 'Total', 'Adquiridas': 'Tengo', 'Porcentaje': '% Llenado'}).style.format({'% Llenado': '{:.1f}%'}), use_container_width=True, hide_index=True)
 
         with sub_tabs[2]:
             df_grupo = df_stats.groupby('grupo', sort=False).agg(Total=('id_lamina', 'count'), Adquiridas=('tiene', 'sum')).reset_index()
